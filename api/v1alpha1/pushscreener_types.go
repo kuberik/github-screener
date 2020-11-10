@@ -28,14 +28,16 @@ type PushScreenerSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of PushScreener. Edit PushScreener_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// Repo specifies which GitHub repository needs to be screened for push events
+	Repo `json:"repo"`
 }
 
 // PushScreenerStatus defines the observed state of PushScreener
 type PushScreenerStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
+
+	ETag `json:"etag"`
 }
 
 // +kubebuilder:object:root=true
