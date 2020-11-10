@@ -1,0 +1,24 @@
+# permissions for end users to edit pushscreeners.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: pushscreener-editor-role
+rules:
+- apiGroups:
+  - github.screeners.kuberik.io
+  resources:
+  - pushscreeners
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - github.screeners.kuberik.io
+  resources:
+  - pushscreeners/status
+  verbs:
+  - get

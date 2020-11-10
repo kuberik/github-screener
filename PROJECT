@@ -2,6 +2,10 @@ domain: kuberik.io
 layout: go.kubebuilder.io/v2
 projectName: github-screener
 repo: github.com/kuberik/github-screener
+resources:
+- group: github.screeners
+  kind: PushScreener
+  version: v1alpha1
 version: 3-alpha
 plugins:
   go.sdk.operatorframework.io/v2-alpha: {}

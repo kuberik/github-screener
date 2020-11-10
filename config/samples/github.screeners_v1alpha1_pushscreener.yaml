@@ -1,0 +1,7 @@
+apiVersion: github.screeners.kuberik.io/v1alpha1
+kind: PushScreener
+metadata:
+  name: pushscreener-sample
+spec:
+  # Add fields here
+  foo: bar
