@@ -1,0 +1,7 @@
+domain: kuberik.io
+layout: go.kubebuilder.io/v2
+projectName: github-screener
+repo: github.com/kuberik/github-screener
+version: 3-alpha
+plugins:
+  go.sdk.operatorframework.io/v2-alpha: {}
