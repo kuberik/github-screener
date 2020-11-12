@@ -27,8 +27,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	"github.com/google/go-github/v32/github"
 	githubscreenersv1alpha1 "github.com/kuberik/github-screener/api/v1alpha1"
-	"github.com/kuberik/github-screener/pkg/github"
 )
 
 // PushScreenerReconciler reconciles a PushScreener object
@@ -87,12 +87,13 @@ func (r *PushScreenerReconciler) StartScreener(screener githubscreenersv1alpha1.
 	shutdown := make(chan bool)
 	r.screenerShutdown[nn] = shutdown
 	go func() {
-		poller := github.NewEventPoller()
+		poller := NewEventPoller()
 		select {
 		case _ = <-shutdown:
 			break
 		default:
-			poller.PollOnce(screener.Spec.Repo)
+			events := poller.PollOnce(screener.Spec.Repo)
+			r.processEvents(events)
 		}
 	}()
 	return nil
@@ -102,4 +103,8 @@ func (r *PushScreenerReconciler) ShutdownScreener(screener controllerutil.Object
 	nn := NamespacedName(screener)
 	r.screenerShutdown[nn] <- true
 	return nil
+}
+
+func (r *PushScreenerReconciler) processEvents(event []github.Event) {
+
 }
