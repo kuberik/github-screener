@@ -1,4 +1,4 @@
-package main
+package github
 
 import (
 	"context"
@@ -11,11 +11,21 @@ import (
 
 	"strconv"
 	"time"
+
+	githubscreenersv1alpha1 "github.com/kuberik/github-screener/api/v1alpha1"
 )
+
+var (
+	cache httpcache.Cache
+)
+
+func init() {
+	cache = httpcache.NewMemoryCache()
+}
 
 // NewClient returns a new cacheable GitHub client
 func NewClient() *github.Client {
-	httpCacheClient := httpcache.NewMemoryCacheTransport().Client()
+	httpCacheClient := httpcache.NewTransport(cache).Client()
 
 	ctx := context.WithValue(context.TODO(), oauth2.HTTPClient, httpCacheClient)
 	ts := oauth2.StaticTokenSource(
@@ -26,18 +36,26 @@ func NewClient() *github.Client {
 	return github.NewClient(tc)
 }
 
-func main() {
-	client := NewClient()
-	for {
-		events, response, _ := client.Activity.ListRepositoryEvents(context.TODO(), "kuberik", "kuberik", &github.ListOptions{})
-		for _, e := range events {
-			fmt.Println(*e.Type)
-		}
-		pollInterval, err := strconv.Atoi(response.Header.Get("X-Poll-Interval"))
-		if err != nil {
-			pollInterval = 60
-		}
-		fmt.Println(response.Header)
-		time.Sleep(time.Duration(pollInterval) * time.Second)
+type EventPoller struct {
+	*github.Client
+}
+
+func NewEventPoller() EventPoller {
+	return EventPoller{
+		Client: NewClient(),
 	}
+}
+
+func (p *EventPoller) PollOnce(repo githubscreenersv1alpha1.Repo) []github.Event {
+	events, response, _ := p.Client.Activity.ListRepositoryEvents(context.TODO(), repo.Owner, repo.Name, &github.ListOptions{})
+	for _, e := range events {
+		fmt.Println(*e.Type)
+	}
+	pollInterval, err := strconv.Atoi(response.Header.Get("X-Poll-Interval"))
+	if err != nil {
+		pollInterval = 60
+	}
+	fmt.Println(response.Header)
+	time.Sleep(time.Duration(pollInterval) * time.Second)
+	return nil
 }

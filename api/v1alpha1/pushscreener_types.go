@@ -37,7 +37,7 @@ type PushScreenerStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	ETag `json:"etag"`
+	ETag `json:"etag,omitempty"`
 }
 
 // +kubebuilder:object:root=true
