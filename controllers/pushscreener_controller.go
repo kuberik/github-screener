@@ -20,10 +20,14 @@ import (
 	"context"
 
 	"github.com/go-logr/logr"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
+	"github.com/google/go-github/v32/github"
 	githubscreenersv1alpha1 "github.com/kuberik/github-screener/api/v1alpha1"
 )
 
@@ -32,16 +36,34 @@ type PushScreenerReconciler struct {
 	client.Client
 	Log    logr.Logger
 	Scheme *runtime.Scheme
+
+	screenerShutdown map[types.NamespacedName]chan bool
 }
 
 // +kubebuilder:rbac:groups=github.screeners.kuberik.io,resources=pushscreeners,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=github.screeners.kuberik.io,resources=pushscreeners/status,verbs=get;update;patch
 
 func (r *PushScreenerReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
-	_ = context.Background()
-	_ = r.Log.WithValues("pushscreener", req.NamespacedName)
+	ctx := context.Background()
+	reqLogger := r.Log.WithValues("pushscreener", req.NamespacedName)
 
-	// your logic here
+	screener := githubscreenersv1alpha1.PushScreener{}
+	err := r.Get(ctx, req.NamespacedName, &screener)
+	if err != nil {
+		if errors.IsNotFound(err) {
+			reqLogger.Info("PushScreener resource not found. Ignoring since object must be deleted.")
+			return ctrl.Result{}, nil
+		}
+		reqLogger.Error(err, "Failed to get PushScreener.")
+		return ctrl.Result{}, err
+	}
+
+	f, err := FinalizerResult(r, &screener)
+	if f != nil {
+		return *f, err
+	}
+
+	r.StartScreener(screener)
 
 	return ctrl.Result{}, nil
 }
@@ -50,4 +72,39 @@ func (r *PushScreenerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&githubscreenersv1alpha1.PushScreener{}).
 		Complete(r)
+}
+
+func (r *PushScreenerReconciler) StartScreener(screener githubscreenersv1alpha1.PushScreener) error {
+	if r.screenerShutdown == nil {
+		r.screenerShutdown = make(map[types.NamespacedName]chan bool)
+	}
+
+	nn := NamespacedName(&screener)
+	if _, ok := r.screenerShutdown[nn]; ok {
+		return nil
+	}
+
+	shutdown := make(chan bool)
+	r.screenerShutdown[nn] = shutdown
+	go func() {
+		poller := NewEventPoller()
+		select {
+		case _ = <-shutdown:
+			break
+		default:
+			events := poller.PollOnce(screener.Spec.Repo)
+			r.processEvents(events)
+		}
+	}()
+	return nil
+}
+
+func (r *PushScreenerReconciler) ShutdownScreener(screener controllerutil.Object) error {
+	nn := NamespacedName(screener)
+	r.screenerShutdown[nn] <- true
+	return nil
+}
+
+func (r *PushScreenerReconciler) processEvents(event []github.Event) {
+
 }

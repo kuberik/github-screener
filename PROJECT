@@ -6,6 +6,9 @@ resources:
 - group: github.screeners
   kind: PushScreener
   version: v1alpha1
+- group: github.screeners
+  kind: Event
+  version: v1alpha1
 version: 3-alpha
 plugins:
   go.sdk.operatorframework.io/v2-alpha: {}
