@@ -2,7 +2,6 @@ package controllers
 
 import (
 	"context"
-	"fmt"
 	"os"
 
 	"github.com/google/go-github/v32/github"
@@ -10,7 +9,6 @@ import (
 	"golang.org/x/oauth2"
 
 	"strconv"
-	"time"
 
 	githubscreenersv1alpha1 "github.com/kuberik/github-screener/api/v1alpha1"
 )
@@ -46,16 +44,21 @@ func NewEventPoller() EventPoller {
 	}
 }
 
-func (p *EventPoller) PollOnce(repo githubscreenersv1alpha1.Repo) []github.Event {
+type EventPollResult struct {
+	Events       []*github.Event
+	ETag         string
+	PollInterval int
+}
+
+func (p *EventPoller) PollOnce(repo githubscreenersv1alpha1.Repo) EventPollResult {
 	events, response, _ := p.Client.Activity.ListRepositoryEvents(context.TODO(), repo.Owner, repo.Name, &github.ListOptions{})
-	for _, e := range events {
-		fmt.Println(*e.Type)
-	}
 	pollInterval, err := strconv.Atoi(response.Header.Get("X-Poll-Interval"))
 	if err != nil {
 		pollInterval = 60
 	}
-	fmt.Println(response.Header)
-	time.Sleep(time.Duration(pollInterval) * time.Second)
-	return nil
+	return EventPollResult{
+		Events:       events,
+		ETag:         response.Header.Get("ETag"),
+		PollInterval: pollInterval,
+	}
 }

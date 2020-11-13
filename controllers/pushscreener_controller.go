@@ -18,8 +18,11 @@ package controllers
 
 import (
 	"context"
+	"fmt"
+	"time"
 
 	"github.com/go-logr/logr"
+	"github.com/google/go-github/v32/github"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -27,8 +30,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
-	"github.com/google/go-github/v32/github"
 	githubscreenersv1alpha1 "github.com/kuberik/github-screener/api/v1alpha1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // PushScreenerReconciler reconciles a PushScreener object
@@ -92,8 +95,9 @@ func (r *PushScreenerReconciler) StartScreener(screener githubscreenersv1alpha1.
 		case _ = <-shutdown:
 			break
 		default:
-			events := poller.PollOnce(screener.Spec.Repo)
-			r.processEvents(events)
+			result := poller.PollOnce(screener.Spec.Repo)
+			time.Sleep(time.Duration(result.PollInterval) * time.Second)
+			r.processPollResult(screener, result)
 		}
 	}()
 	return nil
@@ -105,6 +109,40 @@ func (r *PushScreenerReconciler) ShutdownScreener(screener controllerutil.Object
 	return nil
 }
 
-func (r *PushScreenerReconciler) processEvents(event []github.Event) {
+const (
+	etagLabel = "github.screeners.kuberik.io/etag"
 
+	pushEventSuffix = "gh-pe"
+)
+
+func (r *PushScreenerReconciler) processPollResult(screener githubscreenersv1alpha1.PushScreener, result EventPollResult) {
+	reqLogger := r.Log.WithValues()
+
+	for _, e := range result.Events {
+		payload, err := e.ParsePayload()
+		if err != nil {
+			reqLogger.Error(err, fmt.Sprintf("Failed to parse an event %s/%s#%s", e.Org, e.Repo, e.ID))
+			continue
+		}
+
+		pushEvent, ok := payload.(*github.PushEvent)
+		if !ok {
+			continue
+		}
+
+		ke := githubscreenersv1alpha1.Event{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{
+					// TODO remove
+					"github.screeners.kuberik.io/push-ref": pushEvent.GetRef(),
+				},
+				Labels: map[string]string{
+					etagLabel: result.ETag,
+				},
+				GenerateName: fmt.Sprintf("%s-%s-", screener, pushEventSuffix),
+			},
+			Spec: githubscreenersv1alpha1.EventSpec{},
+		}
+		r.Create(context.TODO(), &ke)
+	}
 }
