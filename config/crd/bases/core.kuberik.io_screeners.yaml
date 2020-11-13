@@ -37,8 +37,6 @@ spec:
           description: ScreenerSpec defines the desired state of Screener
           properties:
             config:
-              additionalProperties:
-                type: string
               type: object
           required:
           - config
