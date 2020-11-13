@@ -10,7 +10,7 @@ import (
 
 	"strconv"
 
-	githubscreenersv1alpha1 "github.com/kuberik/github-screener/api/v1alpha1"
+	corev1alpha1 "github.com/kuberik/github-screener/api/v1alpha1"
 )
 
 var (
@@ -50,7 +50,7 @@ type EventPollResult struct {
 	PollInterval int
 }
 
-func (p *EventPoller) PollOnce(repo githubscreenersv1alpha1.Repo) EventPollResult {
+func (p *EventPoller) PollOnce(repo corev1alpha1.Repo) EventPollResult {
 	events, response, _ := p.Client.Activity.ListRepositoryEvents(context.TODO(), repo.Owner, repo.Name, &github.ListOptions{})
 	pollInterval, err := strconv.Atoi(response.Header.Get("X-Poll-Interval"))
 	if err != nil {

@@ -3,10 +3,10 @@ layout: go.kubebuilder.io/v2
 projectName: github-screener
 repo: github.com/kuberik/github-screener
 resources:
-- group: github.screeners
+- group: core
   kind: PushScreener
   version: v1alpha1
-- group: github.screeners
+- group: core
   kind: Event
   version: v1alpha1
 version: 3-alpha

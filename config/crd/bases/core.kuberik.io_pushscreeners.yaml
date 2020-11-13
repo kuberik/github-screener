@@ -6,9 +6,9 @@ metadata:
   annotations:
     controller-gen.kubebuilder.io/version: v0.3.0
   creationTimestamp: null
-  name: pushscreeners.github.screeners.kuberik.io
+  name: pushscreeners.core.kuberik.io
 spec:
-  group: github.screeners.kuberik.io
+  group: core.kuberik.io
   names:
     kind: PushScreener
     listKind: PushScreenerList
