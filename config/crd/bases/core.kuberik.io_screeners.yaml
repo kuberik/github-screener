@@ -36,28 +36,15 @@ spec:
         spec:
           description: ScreenerSpec defines the desired state of Screener
           properties:
-            repo:
-              description: Repo specifies which GitHub repository needs to be screened
-                for push events
-              properties:
-                name:
-                  type: string
-                owner:
-                  type: string
-              required:
-              - name
-              - owner
+            config:
+              additionalProperties:
+                type: string
               type: object
           required:
-          - repo
+          - config
           type: object
         status:
           description: ScreenerStatus defines the observed state of Screener
-          properties:
-            etag:
-              description: ETag represents the value of ETag header received by the
-                latest API call
-              type: string
           type: object
       type: object
   version: v1alpha1

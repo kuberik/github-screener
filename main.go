@@ -67,12 +67,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.PushScreenerReconciler{
+	if err = (&controllers.ScreenerReconciler{
 		Client: mgr.GetClient(),
-		Log:    ctrl.Log.WithName("controllers").WithName("PushScreener"),
+		Log:    ctrl.Log.WithName("controllers").WithName("Screener"),
 		Scheme: mgr.GetScheme(),
 	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "PushScreener")
+		setupLog.Error(err, "unable to create controller", "controller", "Screener")
 		os.Exit(1)
 	}
 	// +kubebuilder:scaffold:builder

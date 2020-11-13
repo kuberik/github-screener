@@ -28,8 +28,11 @@ type EventSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Foo is an example field of Event. Edit Event_types.go to remove/update
-	Foo string `json:"foo,omitempty"`
+	// Movie is referencing a Movie for which this Event is created
+	Movie `json:"movie,omitempty"`
+
+	// Provision defines a list of objects that will get generated over all provision blocks in the Play
+	Provision metav1.List `json:"provision,omitempty"`
 }
 
 // EventStatus defines the observed state of Event

@@ -31,11 +31,12 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	corev1alpha1 "github.com/kuberik/github-screener/api/v1alpha1"
+	"github.com/kuberik/github-screener/controllers/reconciler"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// PushScreenerReconciler reconciles a PushScreener object
-type PushScreenerReconciler struct {
+// ScreenerReconciler reconciles a Screener object
+type ScreenerReconciler struct {
 	client.Client
 	Log    logr.Logger
 	Scheme *runtime.Scheme
@@ -43,25 +44,25 @@ type PushScreenerReconciler struct {
 	screenerShutdown map[types.NamespacedName]chan bool
 }
 
-// +kubebuilder:rbac:groups=core.kuberik.io,resources=pushscreeners,verbs=get;list;watch;create;update;patch;delete
-// +kubebuilder:rbac:groups=core.kuberik.io,resources=pushscreeners/status,verbs=get;update;patch
+// +kubebuilder:rbac:groups=core.kuberik.io,resources=screeners,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups=core.kuberik.io,resources=screeners/status,verbs=get;update;patch
 
-func (r *PushScreenerReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
+func (r *ScreenerReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	ctx := context.Background()
-	reqLogger := r.Log.WithValues("pushscreener", req.NamespacedName)
+	reqLogger := r.Log.WithValues("screener", req.NamespacedName)
 
-	screener := corev1alpha1.PushScreener{}
+	screener := corev1alpha1.Screener{}
 	err := r.Get(ctx, req.NamespacedName, &screener)
 	if err != nil {
 		if errors.IsNotFound(err) {
-			reqLogger.Info("PushScreener resource not found. Ignoring since object must be deleted.")
+			reqLogger.Info("Screener resource not found. Ignoring since object must be deleted.")
 			return ctrl.Result{}, nil
 		}
-		reqLogger.Error(err, "Failed to get PushScreener.")
+		reqLogger.Error(err, "Failed to get Screener.")
 		return ctrl.Result{}, err
 	}
 
-	f, err := FinalizerResult(r, &screener)
+	f, err := reconciler.FinalizerResult(r, &screener)
 	if f != nil {
 		return *f, err
 	}
@@ -71,13 +72,13 @@ func (r *PushScreenerReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error
 	return ctrl.Result{}, nil
 }
 
-func (r *PushScreenerReconciler) SetupWithManager(mgr ctrl.Manager) error {
+func (r *ScreenerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
-		For(&corev1alpha1.PushScreener{}).
+		For(&corev1alpha1.Screener{}).
 		Complete(r)
 }
 
-func (r *PushScreenerReconciler) StartScreener(screener corev1alpha1.PushScreener) error {
+func (r *ScreenerReconciler) StartScreener(screener corev1alpha1.Screener) error {
 	if r.screenerShutdown == nil {
 		r.screenerShutdown = make(map[types.NamespacedName]chan bool)
 	}
@@ -95,7 +96,11 @@ func (r *PushScreenerReconciler) StartScreener(screener corev1alpha1.PushScreene
 		case _ = <-shutdown:
 			break
 		default:
-			result := poller.PollOnce(screener.Spec.Repo)
+			// TODO parse spec
+			result := poller.PollOnce(corev1alpha1.Repo{
+				Owner: "kuberik",
+				Name:  "kuberik",
+			})
 			time.Sleep(time.Duration(result.PollInterval) * time.Second)
 			r.processPollResult(screener, result)
 		}
@@ -103,7 +108,7 @@ func (r *PushScreenerReconciler) StartScreener(screener corev1alpha1.PushScreene
 	return nil
 }
 
-func (r *PushScreenerReconciler) ShutdownScreener(screener controllerutil.Object) error {
+func (r *ScreenerReconciler) ShutdownScreener(screener controllerutil.Object) error {
 	nn := NamespacedName(screener)
 	r.screenerShutdown[nn] <- true
 	return nil
@@ -115,7 +120,7 @@ const (
 	pushEventSuffix = "gh-pe"
 )
 
-func (r *PushScreenerReconciler) processPollResult(screener corev1alpha1.PushScreener, result EventPollResult) {
+func (r *ScreenerReconciler) processPollResult(screener corev1alpha1.Screener, result EventPollResult) {
 	reqLogger := r.Log.WithValues()
 
 	for _, e := range result.Events {
@@ -145,4 +150,8 @@ func (r *PushScreenerReconciler) processPollResult(screener corev1alpha1.PushScr
 		}
 		r.Create(context.TODO(), &ke)
 	}
+}
+
+func NamespacedName(object controllerutil.Object) types.NamespacedName {
+	return types.NamespacedName{Namespace: object.GetNamespace(), Name: object.GetName()}
 }

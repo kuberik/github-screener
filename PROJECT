@@ -4,7 +4,7 @@ projectName: github-screener
 repo: github.com/kuberik/github-screener
 resources:
 - group: core
-  kind: PushScreener
+  kind: Screener
   version: v1alpha1
 - group: core
   kind: Event

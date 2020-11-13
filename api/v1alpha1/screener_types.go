@@ -23,44 +23,41 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// PushScreenerSpec defines the desired state of PushScreener
-type PushScreenerSpec struct {
+// ScreenerSpec defines the desired state of Screener
+type ScreenerSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
-	// Repo specifies which GitHub repository needs to be screened for push events
-	Repo `json:"repo"`
+	Config map[string]string `json:"config"`
 }
 
-// PushScreenerStatus defines the observed state of PushScreener
-type PushScreenerStatus struct {
+// ScreenerStatus defines the observed state of Screener
+type ScreenerStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-
-	ETag `json:"etag,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 
-// PushScreener is the Schema for the pushscreeners API
-type PushScreener struct {
+// Screener is the Schema for the screeners API
+type Screener struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   PushScreenerSpec   `json:"spec,omitempty"`
-	Status PushScreenerStatus `json:"status,omitempty"`
+	Spec   ScreenerSpec   `json:"spec,omitempty"`
+	Status ScreenerStatus `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 
-// PushScreenerList contains a list of PushScreener
-type PushScreenerList struct {
+// ScreenerList contains a list of Screener
+type ScreenerList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []PushScreener `json:"items"`
+	Items           []Screener `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&PushScreener{}, &PushScreenerList{})
+	SchemeBuilder.Register(&Screener{}, &ScreenerList{})
 }

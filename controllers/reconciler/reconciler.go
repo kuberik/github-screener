@@ -1,14 +1,21 @@
-package controllers
+package reconciler
+
+// TODO move to github.com/kuberik/kuberik
 
 import (
 	"context"
 
-	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 )
+
+type ScreenerReconciler interface {
+	reconcile.Reconciler
+	client.Client
+	ShutdownScreener(controllerutil.Object) error
+}
 
 const screenerFinalizer = "finalizer.screener.kuberik.io"
 
@@ -36,16 +43,6 @@ func contains(list []string, s string) bool {
 		}
 	}
 	return false
-}
-
-type ScreenerReconciler interface {
-	reconcile.Reconciler
-	client.Client
-	ShutdownScreener(controllerutil.Object) error
-}
-
-type Object interface {
-	GetDeletionTimestamp() string
 }
 
 func FinalizerResult(sr ScreenerReconciler, screener controllerutil.Object) (*ctrl.Result, error) {
@@ -79,8 +76,4 @@ func FinalizerResult(sr ScreenerReconciler, screener controllerutil.Object) (*ct
 		}
 	}
 	return nil, nil
-}
-
-func NamespacedName(object controllerutil.Object) types.NamespacedName {
-	return types.NamespacedName{Namespace: object.GetNamespace(), Name: object.GetName()}
 }
