@@ -97,7 +97,10 @@ func (r *ScreenerReconciler) StartScreener(screener corev1alpha1.Screener) error
 	shutdown := make(chan bool)
 	r.screenerShutdown[nn] = shutdown
 	go func() {
-		poller := NewEventPoller()
+		poller := NewEventPoller(Repo{
+			Owner: config.Owner,
+			Name:  config.Name,
+		})
 		reqLogger.Info("Start polling")
 		for {
 			select {
@@ -105,11 +108,12 @@ func (r *ScreenerReconciler) StartScreener(screener corev1alpha1.Screener) error
 				break
 			default:
 				reqLogger.Info("Polling...")
-				result := poller.PollOnce(corev1alpha1.Repo{
-					Owner: config.Owner,
-					Name:  config.Name,
-				})
-				r.processPollResult(screener, result)
+				result, err := poller.PollOnce()
+				if err != nil {
+					reqLogger.Error(err, "Failed to poll", "owner", poller.Repo.Owner, "repo", poller.Repo.Name)
+				} else {
+					r.processPollResult(screener, *result)
+				}
 				time.Sleep(time.Duration(result.PollInterval) * time.Second)
 			}
 		}
@@ -149,7 +153,7 @@ func (r *ScreenerReconciler) processPollResult(screener corev1alpha1.Screener, r
 		ke := corev1alpha1.NewEvent(screener, map[string]string{
 			"GITHUB_REF": pushEvent.GetRef(),
 		})
-		ke.Labels[etagLabel] = result.ETag
+		ke.Labels[etagLabel] = result.ETag.String()
 		err = r.Create(context.TODO(), &ke)
 		if err != nil {
 			reqLogger.Error(err, "Unable to create Kuberik Event from Github Event")
