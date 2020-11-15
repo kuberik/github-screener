@@ -24,7 +24,6 @@ import (
 
 	"github.com/go-logr/logr"
 	"github.com/google/go-github/v32/github"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -158,21 +157,8 @@ func (r *ScreenerReconciler) processPollResult(screener corev1alpha1.Screener, r
 			},
 			Spec: corev1alpha1.EventSpec{
 				Movie: screener.Spec.Movie,
-				Provision: []runtime.RawExtension{
-					runtime.RawExtension{
-						Object: &v1.ConfigMap{
-							TypeMeta: metav1.TypeMeta{
-								APIVersion: "v1",
-								Kind:       "ConfigMap",
-							},
-							ObjectMeta: metav1.ObjectMeta{
-								Name: fmt.Sprintf("%s-%s", screener.Name, "gh-inputs"),
-							},
-							Data: map[string]string{
-								"GITHUB_REF": pushEvent.GetRef(),
-							},
-						},
-					},
+				Data: map[string]string{
+					"GITHUB_REF": pushEvent.GetRef(),
 				},
 			},
 		}
