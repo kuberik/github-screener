@@ -36,13 +36,26 @@ spec:
         spec:
           description: ScreenerSpec defines the desired state of Screener
           properties:
+            class:
+              description: Movie is referencing a Movie for which this Screener creates
+                Events
+              properties:
+                name:
+                  description: Name identifier of the screener class E.g. screeners.kuberik.io/github
+                  type: string
+                type:
+                  description: Type of the Screener to configure E.g. Push
+                  type: string
+              required:
+              - name
+              - type
+              type: object
             config:
               type: object
             movie:
-              description: Movie is referencing a Movie for which this Screener creates
-                Events
               type: string
           required:
+          - class
           - config
           - movie
           type: object
