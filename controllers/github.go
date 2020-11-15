@@ -3,6 +3,7 @@ package controllers
 import (
 	"context"
 	"os"
+	"regexp"
 
 	"github.com/google/go-github/v32/github"
 	"github.com/gregjones/httpcache"
@@ -57,8 +58,9 @@ func (p *EventPoller) PollOnce(repo corev1alpha1.Repo) EventPollResult {
 		pollInterval = 60
 	}
 	return EventPollResult{
-		Events:       events,
-		ETag:         response.Header.Get("ETag"),
+		Events: events,
+		// returns only first 63 characters of etag, since no more can fit in a label
+		ETag:         regexp.MustCompile("\\w{63}").FindString(response.Header.Get("ETag")),
 		PollInterval: pollInterval,
 	}
 }

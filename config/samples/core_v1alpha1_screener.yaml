@@ -3,5 +3,8 @@ kind: Screener
 metadata:
   name: screener-sample
 spec:
-  # Add fields here
-  foo: bar
+  movie: hello-world
+  config:
+    repo:
+      owner: kuberik
+      name: kuberik

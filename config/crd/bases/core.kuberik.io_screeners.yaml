@@ -38,8 +38,13 @@ spec:
           properties:
             config:
               type: object
+            movie:
+              description: Movie is referencing a Movie for which this Screener creates
+                Events
+              type: string
           required:
           - config
+          - movie
           type: object
         status:
           description: ScreenerStatus defines the observed state of Screener

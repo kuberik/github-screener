@@ -18,11 +18,13 @@ package controllers
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/google/go-github/v32/github"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -79,6 +81,9 @@ func (r *ScreenerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 func (r *ScreenerReconciler) StartScreener(screener corev1alpha1.Screener) error {
+	reqLogger := r.Log.WithValues("start", screener)
+	reqLogger.Info("Starting screener")
+
 	if r.screenerShutdown == nil {
 		r.screenerShutdown = make(map[types.NamespacedName]chan bool)
 	}
@@ -88,21 +93,27 @@ func (r *ScreenerReconciler) StartScreener(screener corev1alpha1.Screener) error
 		return nil
 	}
 
+	config := &PushScreenerConfig{}
+	ParseScreenerConfig(screener, config)
+
 	shutdown := make(chan bool)
 	r.screenerShutdown[nn] = shutdown
 	go func() {
 		poller := NewEventPoller()
-		select {
-		case _ = <-shutdown:
-			break
-		default:
-			// TODO parse spec
-			result := poller.PollOnce(corev1alpha1.Repo{
-				Owner: "kuberik",
-				Name:  "kuberik",
-			})
-			time.Sleep(time.Duration(result.PollInterval) * time.Second)
-			r.processPollResult(screener, result)
+		reqLogger.Info("Start polling")
+		for {
+			select {
+			case _ = <-shutdown:
+				break
+			default:
+				reqLogger.Info("Polling...")
+				result := poller.PollOnce(corev1alpha1.Repo{
+					Owner: config.Owner,
+					Name:  config.Name,
+				})
+				r.processPollResult(screener, result)
+				time.Sleep(time.Duration(result.PollInterval) * time.Second)
+			}
 		}
 	}()
 	return nil
@@ -111,6 +122,7 @@ func (r *ScreenerReconciler) StartScreener(screener corev1alpha1.Screener) error
 func (r *ScreenerReconciler) ShutdownScreener(screener controllerutil.Object) error {
 	nn := NamespacedName(screener)
 	r.screenerShutdown[nn] <- true
+	delete(r.screenerShutdown, nn)
 	return nil
 }
 
@@ -121,7 +133,7 @@ const (
 )
 
 func (r *ScreenerReconciler) processPollResult(screener corev1alpha1.Screener, result EventPollResult) {
-	reqLogger := r.Log.WithValues()
+	reqLogger := r.Log.WithValues("process-poll", screener)
 
 	for _, e := range result.Events {
 		payload, err := e.ParsePayload()
@@ -132,26 +144,59 @@ func (r *ScreenerReconciler) processPollResult(screener corev1alpha1.Screener, r
 
 		pushEvent, ok := payload.(*github.PushEvent)
 		if !ok {
+			reqLogger.Info("Skipping event", "type", e.GetType())
 			continue
 		}
 
 		ke := corev1alpha1.Event{
 			ObjectMeta: metav1.ObjectMeta{
-				Annotations: map[string]string{
-					// TODO remove
-					"core.kuberik.io/push-ref": pushEvent.GetRef(),
-				},
 				Labels: map[string]string{
 					etagLabel: result.ETag,
 				},
 				GenerateName: fmt.Sprintf("%s-%s-", screener.Name, pushEventSuffix),
+				Namespace:    screener.Namespace,
 			},
-			Spec: corev1alpha1.EventSpec{},
+			Spec: corev1alpha1.EventSpec{
+				Movie: screener.Spec.Movie,
+				Provision: []runtime.RawExtension{
+					runtime.RawExtension{
+						Object: &v1.ConfigMap{
+							TypeMeta: metav1.TypeMeta{
+								APIVersion: "v1",
+								Kind:       "ConfigMap",
+							},
+							ObjectMeta: metav1.ObjectMeta{
+								Name: fmt.Sprintf("%s-%s", screener.Name, "gh-inputs"),
+							},
+							Data: map[string]string{
+								"GITHUB_REF": pushEvent.GetRef(),
+							},
+						},
+					},
+				},
+			},
 		}
-		r.Create(context.TODO(), &ke)
+		err = r.Create(context.TODO(), &ke)
+		if err != nil {
+			reqLogger.Error(err, "Unable to create Kuberik Event from Github Event")
+		}
 	}
 }
 
 func NamespacedName(object controllerutil.Object) types.NamespacedName {
 	return types.NamespacedName{Namespace: object.GetNamespace(), Name: object.GetName()}
+}
+
+type PushScreenerConfig struct {
+	Repo `json:"repo"`
+}
+
+// Repo defines an unique GitHub repo
+type Repo struct {
+	Name  string `json:"name"`
+	Owner string `json:"owner"`
+}
+
+func ParseScreenerConfig(screener corev1alpha1.Screener, obj interface{}) error {
+	return json.Unmarshal(screener.Spec.Config.Raw, obj)
 }

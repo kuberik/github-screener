@@ -18,6 +18,7 @@ package v1alpha1
 
 import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
 )
 
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
@@ -29,10 +30,10 @@ type EventSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Movie is referencing a Movie for which this Event is created
-	Movie `json:"movie,omitempty"`
+	Movie string `json:"movie,omitempty"`
 
 	// Provision defines a list of objects that will get generated over all provision blocks in the Play
-	Provision metav1.List `json:"provision,omitempty"`
+	Provision []runtime.RawExtension `json:"provision,omitempty"`
 }
 
 // EventStatus defines the observed state of Event
