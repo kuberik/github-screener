@@ -36,15 +36,14 @@ spec:
         spec:
           description: EventSpec defines the desired state of Event
           properties:
+            data:
+              additionalProperties:
+                type: string
+              description: Data contains event information
+              type: object
             movie:
               description: Movie is referencing a Movie for which this Event is created
               type: string
-            provision:
-              description: Provision defines a list of objects that will get generated
-                over all provision blocks in the Play
-              items:
-                type: object
-              type: array
           type: object
         status:
           description: EventStatus defines the observed state of Event
