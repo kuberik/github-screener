@@ -1,9 +1,12 @@
 apiVersion: core.kuberik.io/v1alpha1
 kind: Screener
 metadata:
-  name: screener-sample
+  name: push-screener
 spec:
-  movie: hello-world
+  movie: kuberik-ci
+  class:
+    name: screeners.kuberik.io/github
+    type: Push
   config:
     repo:
       owner: kuberik

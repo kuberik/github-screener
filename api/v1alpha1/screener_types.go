@@ -30,8 +30,18 @@ type ScreenerSpec struct {
 	// Important: Run "make" to regenerate code after modifying this file
 
 	// Movie is referencing a Movie for which this Screener creates Events
+	Class  ScreenerClass        `json:"class"`
 	Movie  string               `json:"movie"`
 	Config runtime.RawExtension `json:"config"`
+}
+
+type ScreenerClass struct {
+	// Name identifier of the screener class
+	// E.g. screeners.kuberik.io/github
+	Name string `json:"name"`
+	// Type of the Screener to configure
+	// E.g. Push
+	Type string `json:"type"`
 }
 
 // ScreenerStatus defines the observed state of Screener
