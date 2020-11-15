@@ -60,7 +60,7 @@ func NewEvent(screener Screener, data map[string]string) Event {
 		ObjectMeta: metav1.ObjectMeta{
 			Labels:       map[string]string{},
 			Annotations:  map[string]string{},
-			GenerateName: fmt.Sprintf("%s-%s-%s-", screener.Name, screener.Spec.Class.Name, screener.Spec.Class.Type),
+			GenerateName: fmt.Sprintf("%s-", screener.Name),
 			Namespace:    screener.Namespace,
 		},
 		Spec: EventSpec{
