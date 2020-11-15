@@ -37,10 +37,10 @@ type ScreenerSpec struct {
 
 type ScreenerClass struct {
 	// Name identifier of the screener class
-	// E.g. screeners.kuberik.io/github
+	// E.g. github
 	Name string `json:"name"`
 	// Type of the Screener to configure
-	// E.g. Push
+	// E.g. push
 	Type string `json:"type"`
 }
 

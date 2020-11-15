@@ -33,7 +33,6 @@ import (
 
 	corev1alpha1 "github.com/kuberik/github-screener/api/v1alpha1"
 	"github.com/kuberik/github-screener/controllers/reconciler"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 // ScreenerReconciler reconciles a Screener object
@@ -147,21 +146,10 @@ func (r *ScreenerReconciler) processPollResult(screener corev1alpha1.Screener, r
 			continue
 		}
 
-		ke := corev1alpha1.Event{
-			ObjectMeta: metav1.ObjectMeta{
-				Labels: map[string]string{
-					etagLabel: result.ETag,
-				},
-				GenerateName: fmt.Sprintf("%s-%s-", screener.Name, pushEventSuffix),
-				Namespace:    screener.Namespace,
-			},
-			Spec: corev1alpha1.EventSpec{
-				Movie: screener.Spec.Movie,
-				Data: map[string]string{
-					"GITHUB_REF": pushEvent.GetRef(),
-				},
-			},
-		}
+		ke := corev1alpha1.NewEvent(screener, map[string]string{
+			"GITHUB_REF": pushEvent.GetRef(),
+		})
+		ke.Labels[etagLabel] = result.ETag
 		err = r.Create(context.TODO(), &ke)
 		if err != nil {
 			reqLogger.Error(err, "Unable to create Kuberik Event from Github Event")
@@ -175,12 +163,6 @@ func NamespacedName(object controllerutil.Object) types.NamespacedName {
 
 type PushScreenerConfig struct {
 	Repo `json:"repo"`
-}
-
-// Repo defines an unique GitHub repo
-type Repo struct {
-	Name  string `json:"name"`
-	Owner string `json:"owner"`
 }
 
 func ParseScreenerConfig(screener corev1alpha1.Screener, obj interface{}) error {

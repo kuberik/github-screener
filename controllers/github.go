@@ -64,3 +64,9 @@ func (p *EventPoller) PollOnce(repo corev1alpha1.Repo) EventPollResult {
 		PollInterval: pollInterval,
 	}
 }
+
+// Repo defines an unique GitHub repo
+type Repo struct {
+	Name  string `json:"name"`
+	Owner string `json:"owner"`
+}
