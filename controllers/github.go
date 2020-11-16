@@ -2,11 +2,10 @@ package controllers
 
 import (
 	"context"
-	"os"
 	"regexp"
 
 	"github.com/google/go-github/v32/github"
-	"github.com/gregjones/httpcache"
+	"github.com/m4ns0ur/httpcache"
 	"golang.org/x/oauth2"
 
 	"strconv"
@@ -21,12 +20,12 @@ func init() {
 }
 
 // NewClient returns a new cacheable GitHub client
-func NewClient() *github.Client {
+func NewClient(token string) *github.Client {
 	httpCacheClient := httpcache.NewTransport(cache).Client()
 
 	ctx := context.WithValue(context.TODO(), oauth2.HTTPClient, httpCacheClient)
 	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: os.Getenv("GITHUB_TOKEN")},
+		&oauth2.Token{AccessToken: token},
 	)
 	tc := oauth2.NewClient(ctx, ts)
 
@@ -36,11 +35,13 @@ func NewClient() *github.Client {
 type EventPoller struct {
 	*github.Client
 	Repo Repo
+
+	checkpoint string
 }
 
-func NewEventPoller(repo Repo) EventPoller {
+func NewEventPoller(repo Repo, token string) EventPoller {
 	return EventPoller{
-		Client: NewClient(),
+		Client: NewClient(token),
 		Repo:   repo,
 	}
 }
@@ -56,10 +57,22 @@ func (p *EventPoller) PollOnce() (*EventPollResult, error) {
 	if err != nil {
 		return nil, err
 	}
+
+	for i, e := range events {
+		if *e.ID == p.checkpoint {
+			events = events[0:i]
+		}
+	}
+
+	if len(events) > 0 {
+		p.checkpoint = *events[0].ID
+	}
+
 	pollInterval, err := strconv.Atoi(response.Header.Get("X-Poll-Interval"))
 	if err != nil {
 		pollInterval = 60
 	}
+
 	return &EventPollResult{
 		Events: events,
 		// returns only first 63 characters of etag, since no more can fit in a label

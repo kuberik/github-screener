@@ -41,7 +41,7 @@ spec:
                 Events
               properties:
                 name:
-                  description: Name identifier of the screener class E.g. github
+                  description: Name identifier of the screener class E.g. screeners.kuberik.io/github
                   type: string
                 type:
                   description: Type of the Screener to configure E.g. push

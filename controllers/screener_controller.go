@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -100,7 +101,7 @@ func (r *ScreenerReconciler) StartScreener(screener corev1alpha1.Screener) error
 		poller := NewEventPoller(Repo{
 			Owner: config.Owner,
 			Name:  config.Name,
-		})
+		}, os.Getenv("GITHUB_TOKEN")) // TODO replace by sourcing from secret
 		reqLogger.Info("Start polling")
 		for {
 			select {
