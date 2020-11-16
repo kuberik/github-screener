@@ -31,7 +31,8 @@ func TestEventPollerPollOnce(t *testing.T) {
 		},
 	)
 
-	eventPoller := NewEventPoller(repo, "TODO")
+	eventPoller := NewEventPoller()
+	eventPoller.Repo = repo
 	pollResult, err := eventPoller.PollOnce()
 	if err != nil {
 		t.Fatalf("Poll resulted in an error: %s", err)
@@ -82,7 +83,8 @@ func TestEventPollerPollCache(t *testing.T) {
 		},
 	)
 
-	eventPoller := NewEventPoller(repo, "TODO")
+	eventPoller := NewEventPoller()
+	eventPoller.Repo = repo
 	pollResult, err := eventPoller.PollOnce()
 	if err != nil {
 		t.Fatalf("Poll resulted in an error: %s", err)
@@ -140,7 +142,8 @@ func TestEventPollerPollTwice(t *testing.T) {
 		},
 	)
 
-	eventPoller := NewEventPoller(repo, "TODO")
+	eventPoller := NewEventPoller()
+	eventPoller.Repo = repo
 	pollResult, err := eventPoller.PollOnce()
 	if err != nil {
 		t.Fatalf("Poll resulted in an error: %s", err)
