@@ -20,29 +20,29 @@ func init() {
 }
 
 // NewClient returns a new cacheable GitHub client
-func NewClient(token string) *github.Client {
+func NewClient() (*github.Client, *oauth2.Token) {
 	httpCacheClient := httpcache.NewTransport(cache).Client()
 
 	ctx := context.WithValue(context.TODO(), oauth2.HTTPClient, httpCacheClient)
-	ts := oauth2.StaticTokenSource(
-		&oauth2.Token{AccessToken: token},
-	)
+	oauthToken := &oauth2.Token{AccessToken: ""}
+	ts := oauth2.StaticTokenSource(oauthToken)
 	tc := oauth2.NewClient(ctx, ts)
 
-	return github.NewClient(tc)
+	return github.NewClient(tc), oauthToken
 }
 
 type EventPoller struct {
 	*github.Client
-	Repo Repo
-
+	Repo       Repo
+	Token      *oauth2.Token
 	checkpoint string
 }
 
-func NewEventPoller(repo Repo, token string) EventPoller {
+func NewEventPoller() EventPoller {
+	client, oauthToken := NewClient()
 	return EventPoller{
-		Client: NewClient(token),
-		Repo:   repo,
+		Client: client,
+		Token:  oauthToken,
 	}
 }
 

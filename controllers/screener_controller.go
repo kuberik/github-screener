@@ -18,13 +18,14 @@ package controllers
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"os"
 	"time"
 
 	"github.com/go-logr/logr"
 	"github.com/google/go-github/v32/github"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -43,7 +44,7 @@ type ScreenerReconciler struct {
 	Scheme *runtime.Scheme
 
 	screenerShutdown map[types.NamespacedName]chan bool
-	screenerUpdate   map[types.NamespacedName]chan PushScreenerConfig
+	screenerUpdate   map[types.NamespacedName]chan corev1alpha1.Screener
 }
 
 // +kubebuilder:rbac:groups=core.kuberik.io,resources=screeners,verbs=get;list;watch;create;update;patch;delete
@@ -69,7 +70,25 @@ func (r *ScreenerReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return *f, err
 	}
 
-	r.StartScreener(screener)
+	reqLogger.Info("Starting screener")
+	if r.screenerShutdown == nil {
+		r.screenerShutdown = make(map[types.NamespacedName]chan bool)
+	}
+
+	nn := NamespacedName(&screener)
+	_, newScreener := r.screenerShutdown[nn]
+	if newScreener {
+		r.screenerShutdown[nn] = make(chan bool)
+		r.screenerUpdate[nn] = make(chan corev1alpha1.Screener)
+	}
+	r.screenerUpdate[nn] <- screener
+
+	if newScreener {
+		go r.StartScreener(nn)
+		return ctrl.Result{}, nil
+	}
+	// Update screener instead
+	r.screenerUpdate[nn] <- screener
 
 	return ctrl.Result{}, nil
 }
@@ -80,52 +99,33 @@ func (r *ScreenerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *ScreenerReconciler) StartScreener(screener corev1alpha1.Screener) error {
-	reqLogger := r.Log.WithValues("start", screener)
-	reqLogger.Info("Starting screener")
-
-	if r.screenerShutdown == nil {
-		r.screenerShutdown = make(map[types.NamespacedName]chan bool)
-	}
-
-	config := &PushScreenerConfig{}
-	ParseScreenerConfig(screener, config)
-
-	nn := NamespacedName(&screener)
-	if _, ok := r.screenerShutdown[nn]; !ok {
-		r.screenerShutdown[nn] = make(chan bool)
-		r.screenerUpdate[nn] = make(chan PushScreenerConfig)
-	} else {
-		// Update screener instead
-		r.screenerUpdate[nn] <- *config
-		return nil
-	}
-
-	go func() {
-		poller := NewEventPoller(Repo{
-			Owner: config.Owner,
-			Name:  config.Name,
-		}, os.Getenv("GITHUB_TOKEN")) // TODO replace by sourcing from secret
-		reqLogger.Info("Start polling")
-		for {
-			select {
-			case _ = <-r.screenerShutdown[nn]:
-				return
-			case sc := <-r.screenerUpdate[nn]:
-				poller.Repo = sc.Repo
-			default:
-				reqLogger.Info("Polling...")
-				result, err := poller.PollOnce()
-				if err != nil {
-					reqLogger.Error(err, "Failed to poll", "owner", poller.Repo.Owner, "repo", poller.Repo.Name)
-				} else {
-					r.processPollResult(screener, *result)
-				}
-				time.Sleep(time.Duration(result.PollInterval) * time.Second)
+func (r *ScreenerReconciler) StartScreener(nn types.NamespacedName) {
+	poller := NewEventPoller()
+	var screener corev1alpha1.Screener
+	for {
+		select {
+		case _ = <-r.screenerShutdown[nn]:
+			return
+		case screener = <-r.screenerUpdate[nn]:
+			config := &PushScreenerConfig{}
+			ParseScreenerConfig(screener, config)
+			poller.Repo = config.Repo
+			if config.TokenSecret != "" {
+				secret := &v1.Secret{}
+				// TODO retry on error
+				_ = r.Get(context.TODO(), types.NamespacedName{Name: config.TokenSecret, Namespace: screener.Namespace}, secret)
+				token, _ := base64.StdEncoding.DecodeString(string(secret.Data["token"]))
+				poller.Token.AccessToken = string(token)
 			}
+		default:
+			result, err := poller.PollOnce()
+			// TODO what to do on error?
+			if err == nil {
+				r.processPollResult(screener, *result)
+			}
+			time.Sleep(time.Duration(result.PollInterval) * time.Second)
 		}
-	}()
-	return nil
+	}
 }
 
 func (r *ScreenerReconciler) ShutdownScreener(screener controllerutil.Object) error {
@@ -173,7 +173,8 @@ func NamespacedName(object controllerutil.Object) types.NamespacedName {
 }
 
 type PushScreenerConfig struct {
-	Repo `json:"repo"`
+	Repo        `json:"repo"`
+	TokenSecret string `json:"tokenSecret"`
 }
 
 func ParseScreenerConfig(screener corev1alpha1.Screener, obj interface{}) error {
