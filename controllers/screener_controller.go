@@ -43,6 +43,7 @@ type ScreenerReconciler struct {
 	Scheme *runtime.Scheme
 
 	screenerShutdown map[types.NamespacedName]chan bool
+	screenerUpdate   map[types.NamespacedName]chan PushScreenerConfig
 }
 
 // +kubebuilder:rbac:groups=core.kuberik.io,resources=screeners,verbs=get;list;watch;create;update;patch;delete
@@ -87,16 +88,19 @@ func (r *ScreenerReconciler) StartScreener(screener corev1alpha1.Screener) error
 		r.screenerShutdown = make(map[types.NamespacedName]chan bool)
 	}
 
-	nn := NamespacedName(&screener)
-	if _, ok := r.screenerShutdown[nn]; ok {
-		return nil
-	}
-
 	config := &PushScreenerConfig{}
 	ParseScreenerConfig(screener, config)
 
-	shutdown := make(chan bool)
-	r.screenerShutdown[nn] = shutdown
+	nn := NamespacedName(&screener)
+	if _, ok := r.screenerShutdown[nn]; !ok {
+		r.screenerShutdown[nn] = make(chan bool)
+		r.screenerUpdate[nn] = make(chan PushScreenerConfig)
+	} else {
+		// Update screener instead
+		r.screenerUpdate[nn] <- *config
+		return nil
+	}
+
 	go func() {
 		poller := NewEventPoller(Repo{
 			Owner: config.Owner,
@@ -105,8 +109,10 @@ func (r *ScreenerReconciler) StartScreener(screener corev1alpha1.Screener) error
 		reqLogger.Info("Start polling")
 		for {
 			select {
-			case _ = <-shutdown:
-				break
+			case _ = <-r.screenerShutdown[nn]:
+				return
+			case sc := <-r.screenerUpdate[nn]:
+				poller.Repo = sc.Repo
 			default:
 				reqLogger.Info("Polling...")
 				result, err := poller.PollOnce()
