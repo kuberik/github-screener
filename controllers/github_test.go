@@ -7,7 +7,6 @@ import (
 
 	"github.com/google/go-github/v32/github"
 	"github.com/jarcoal/httpmock"
-	"github.com/m4ns0ur/httpcache"
 )
 
 func TestEventPollerPollOnce(t *testing.T) {
@@ -84,9 +83,6 @@ func TestEventPollerPollCache(t *testing.T) {
 	)
 
 	eventPoller := NewEventPoller(repo, "TODO")
-	transport := httpcache.NewMemoryCacheTransport()
-	client := github.NewClient(transport.Client())
-	eventPoller.Client = client
 	pollResult, err := eventPoller.PollOnce()
 	if err != nil {
 		t.Fatalf("Poll resulted in an error: %s", err)
@@ -145,9 +141,6 @@ func TestEventPollerPollTwice(t *testing.T) {
 	)
 
 	eventPoller := NewEventPoller(repo, "TODO")
-	transport := httpcache.NewMemoryCacheTransport()
-	client := github.NewClient(transport.Client())
-	eventPoller.Client = client
 	pollResult, err := eventPoller.PollOnce()
 	if err != nil {
 		t.Fatalf("Poll resulted in an error: %s", err)
