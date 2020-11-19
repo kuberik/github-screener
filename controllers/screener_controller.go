@@ -64,7 +64,7 @@ func (r *ScreenerReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
-	f, err := reconciler.FinalizerResult(r, &screener)
+	f, err := reconciler.FinalizerResult(r, screener)
 	if f != nil {
 		return *f, err
 	}
@@ -82,15 +82,13 @@ func (r *ScreenerReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		r.screenerShutdown[nn] = make(chan bool, 1)
 		r.screenerUpdate[nn] = make(chan corev1alpha1.Screener, 1)
 	}
-	r.screenerUpdate[nn] <- screener
+	r.UpdateScreener(screener)
 
 	if !screenerStarted {
 		reqLogger.Info("Starting screener")
 		go r.RunScreener(nn)
 		return ctrl.Result{}, nil
 	}
-	// Update screener instead
-	r.screenerUpdate[nn] <- screener
 
 	return ctrl.Result{}, nil
 }
@@ -147,8 +145,12 @@ func (r *ScreenerReconciler) RunScreener(nn types.NamespacedName) {
 	}
 }
 
-func (r *ScreenerReconciler) ShutdownScreener(screener controllerutil.Object) error {
-	nn := NamespacedName(screener)
+func (r *ScreenerReconciler) UpdateScreener(screener corev1alpha1.Screener) {
+	r.screenerUpdate[NamespacedName(&screener)] <- screener
+}
+
+func (r *ScreenerReconciler) ShutdownScreener(screener corev1alpha1.Screener) error {
+	nn := NamespacedName(&screener)
 	r.screenerShutdown[nn] <- true
 	delete(r.screenerShutdown, nn)
 	return nil
