@@ -17,8 +17,6 @@ limitations under the License.
 package v1alpha1
 
 import (
-	"fmt"
-
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
@@ -53,21 +51,6 @@ type Event struct {
 
 	Spec   EventSpec   `json:"spec,omitempty"`
 	Status EventStatus `json:"status,omitempty"`
-}
-
-func NewEvent(screener Screener, data map[string]string) Event {
-	return Event{
-		ObjectMeta: metav1.ObjectMeta{
-			Labels:       map[string]string{},
-			Annotations:  map[string]string{},
-			GenerateName: fmt.Sprintf("%s-", screener.Name),
-			Namespace:    screener.Namespace,
-		},
-		Spec: EventSpec{
-			Movie: screener.Spec.Movie,
-			Data:  data,
-		},
-	}
 }
 
 // +kubebuilder:object:root=true

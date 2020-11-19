@@ -17,6 +17,8 @@ limitations under the License.
 package v1alpha1
 
 import (
+	"encoding/json"
+
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	runtime "k8s.io/apimachinery/pkg/runtime"
 )
@@ -60,6 +62,11 @@ type Screener struct {
 
 	Spec   ScreenerSpec   `json:"spec,omitempty"`
 	Status ScreenerStatus `json:"status,omitempty"`
+}
+
+// ParseConfig loads screener config into specific screener config
+func (s *Screener) ParseConfig(screener Screener, obj interface{}) error {
+	return json.Unmarshal(s.Spec.Config.Raw, obj)
 }
 
 // +kubebuilder:object:root=true

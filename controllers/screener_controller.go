@@ -86,7 +86,8 @@ func (r *ScreenerReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	if !screenerStarted {
 		reqLogger.Info("Starting screener")
-		go r.RunScreener(nn)
+		sc := NewPushEventScreenerController(r.Client)
+		go r.StartScreener(&sc, nn)
 		return ctrl.Result{}, nil
 	}
 
@@ -99,48 +100,74 @@ func (r *ScreenerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *ScreenerReconciler) RunScreener(nn types.NamespacedName) {
-	poller := NewEventPoller()
+func populateEvent(screener corev1alpha1.Screener, event *corev1alpha1.Event) {
+	if event.Labels == nil {
+		event.Labels = map[string]string{}
+	}
+	if event.Annotations == nil {
+		event.Annotations = map[string]string{}
+	}
+	event.Namespace = screener.Namespace
+	event.GenerateName = fmt.Sprintf("%s-", screener.Name)
+	event.Spec.Movie = screener.Spec.Movie
+}
+
+func (r *ScreenerReconciler) reloadScreener(
+	sc ScreenerController,
+	screener corev1alpha1.Screener,
+	eventCreate chan corev1alpha1.Event,
+	reloadScreener chan bool,
+) {
+	reqLogger := r.Log.WithValues("screener", NamespacedName(&screener))
+	reqLogger.Info("updating")
+	if eventCreate != nil {
+		close(eventCreate)
+	}
+	// TODO reduce to less than 100
+	eventCreate = make(chan corev1alpha1.Event, 100)
+	if err := sc.Update(screener); err != nil {
+		// TODO do exponexntial back-off
+		time.Sleep(5 * time.Second)
+		reloadScreener <- true
+		return
+	}
+	reqLogger.Info("restarting")
+	go func() {
+		defer func() { recover(); reqLogger.Info("stopped old version") }()
+		if err := sc.Screen(eventCreate); err != nil {
+			// TODO do exponential back-off
+			time.Sleep(5 * time.Second)
+			reloadScreener <- true
+		}
+	}()
+}
+
+func (r *ScreenerReconciler) StartScreener(sc ScreenerController, nn types.NamespacedName) {
 	var screener corev1alpha1.Screener
+	var eventCreate chan corev1alpha1.Event
+	reloadScreener := make(chan bool)
+	defer close(reloadScreener)
+
+	reqLogger := r.Log.WithValues("screener", nn)
 	for {
-		reqLogger := r.Log.WithValues("running", &screener)
 		select {
+		case _ = <-reloadScreener:
+			r.reloadScreener(sc, screener, eventCreate, reloadScreener)
 		case screener = <-r.screenerUpdate[nn]:
-			reqLogger.Info("Update screener")
-			config := &PushScreenerConfig{}
-			ParseScreenerConfig(screener, config)
-			poller.Repo = config.Repo
-			if config.TokenSecret != "" {
-				secret := &v1.Secret{}
-				err := r.Get(context.TODO(), types.NamespacedName{Name: config.TokenSecret, Namespace: screener.Namespace}, secret)
-
-				if err != nil {
-					// Skip setting up authentication for now. The section will be called again on 403
-					reqLogger.Error(err, "failed to fetch token secret")
-					continue
-				}
-
-				tokenKey := "token"
-				if _, ok := secret.Data[tokenKey]; ok {
-					poller.Token.AccessToken = string(secret.Data[tokenKey])
-				}
-			}
+			r.reloadScreener(sc, screener, eventCreate, reloadScreener)
 		case _ = <-r.screenerShutdown[nn]:
-			reqLogger.Info("Shutdown screener")
+			close(eventCreate)
+			reqLogger.Info("shutting down")
 			return
-		default:
-			reqLogger.Info("Poll")
-			result, err := poller.PollOnce()
-			// TODO what to do on error?
-			if errors.IsUnauthorized(err) {
-				r.screenerUpdate[nn] <- screener
-			} else if err != nil {
-				time.Sleep(time.Second)
-				reqLogger.Error(err, "failed poll")
-				continue
+		// TODO think if we need to check if channel is open or closed
+		case event := <-eventCreate:
+			reqLogger.Info("creating events")
+			populateEvent(screener, &event)
+			err := r.Create(context.TODO(), &event)
+			if err != nil {
+				// TODO requeue somehow
+				reqLogger.Info("Failed to create event")
 			}
-			r.processPollResult(screener, *result)
-			time.Sleep(time.Duration(result.PollInterval) * time.Second)
 		}
 	}
 }
@@ -152,42 +179,16 @@ func (r *ScreenerReconciler) UpdateScreener(screener corev1alpha1.Screener) {
 func (r *ScreenerReconciler) ShutdownScreener(screener corev1alpha1.Screener) error {
 	nn := NamespacedName(&screener)
 	r.screenerShutdown[nn] <- true
+	close(r.screenerShutdown[nn])
+	close(r.screenerUpdate[nn])
 	delete(r.screenerShutdown, nn)
 	delete(r.screenerUpdate, nn)
 	return nil
 }
 
 const (
-	etagLabel = "core.kuberik.io/etag"
+	etagLabel = "github.screeners.kuberik.io/etag"
 )
-
-func (r *ScreenerReconciler) processPollResult(screener corev1alpha1.Screener, result EventPollResult) {
-	reqLogger := r.Log.WithValues("process-poll", screener)
-
-	for _, e := range result.Events {
-		payload, err := e.ParsePayload()
-		if err != nil {
-			reqLogger.Error(err, fmt.Sprintf("Failed to parse an event %s/%s#%s", e.GetRepo().GetOwner(), e.GetRepo().GetName(), e.GetID()))
-			continue
-		}
-
-		pushEvent, ok := payload.(*github.PushEvent)
-		if !ok {
-			reqLogger.Info("Skipping event", "type", e.GetType())
-			continue
-		}
-
-		ke := corev1alpha1.NewEvent(screener, map[string]string{
-			"GITHUB_REF": pushEvent.GetRef(),
-		})
-		// TODO remove if not needed
-		ke.Labels[etagLabel] = result.ETag.String()
-		err = r.Create(context.TODO(), &ke)
-		if err != nil {
-			reqLogger.Error(err, "Unable to create Kuberik Event from Github Event")
-		}
-	}
-}
 
 func NamespacedName(object controllerutil.Object) types.NamespacedName {
 	return types.NamespacedName{Namespace: object.GetNamespace(), Name: object.GetName()}
@@ -200,4 +201,87 @@ type PushScreenerConfig struct {
 
 func ParseScreenerConfig(screener corev1alpha1.Screener, obj interface{}) error {
 	return json.Unmarshal(screener.Spec.Config.Raw, obj)
+}
+
+type ScreenerController interface {
+	Update(corev1alpha1.Screener) error
+	Screen(chan corev1alpha1.Event) error
+}
+
+type PushEventScreenerController struct {
+	poller EventPoller
+	client.Client
+}
+
+func NewPushEventScreenerController(client client.Client) PushEventScreenerController {
+	return PushEventScreenerController{
+		poller: NewEventPoller(),
+		Client: client,
+	}
+}
+
+func (sc *PushEventScreenerController) Update(screener corev1alpha1.Screener) error {
+	config := &PushScreenerConfig{}
+	ParseScreenerConfig(screener, config)
+	sc.poller.Repo = config.Repo
+	if config.TokenSecret != "" {
+		secret := &v1.Secret{}
+		err := sc.Get(context.TODO(), types.NamespacedName{Name: config.TokenSecret, Namespace: screener.Namespace}, secret)
+
+		if err != nil {
+			// Skip setting up authentication for now. The function will be called again on 403
+			// reqLogger.Error(err, "failed to fetch token secret")
+			return err
+		}
+
+		tokenKey := "token"
+		if _, ok := secret.Data[tokenKey]; ok {
+			sc.poller.Token.AccessToken = string(secret.Data[tokenKey])
+		}
+	}
+	return nil
+}
+
+func (sc *PushEventScreenerController) Screen(eventCreate chan corev1alpha1.Event) error {
+	for {
+		ctrl.Log.Info("polling")
+		// reqLogger.Info("Poll")
+		result, err := sc.poller.PollOnce()
+		// TODO what to do on error?
+		if err != nil {
+			ctrl.Log.Error(err, "poll error")
+			return err
+		}
+		for _, e := range sc.processPollResult(*result) {
+			eventCreate <- e
+		}
+		time.Sleep(time.Duration(result.PollInterval) * time.Second)
+	}
+}
+
+func (sc *PushEventScreenerController) processPollResult(result EventPollResult) (createEvents []corev1alpha1.Event) {
+	for _, e := range result.Events {
+		payload, err := e.ParsePayload()
+		if err != nil {
+			ctrl.Log.Error(err, fmt.Sprintf("Failed to parse an event %s/%s#%s", e.GetRepo().GetOwner(), e.GetRepo().GetName(), e.GetID()))
+			continue
+		}
+
+		pushEvent, ok := payload.(*github.PushEvent)
+		if !ok {
+			ctrl.Log.Info("Skipping event", "type", e.GetType())
+			continue
+		}
+
+		ke := corev1alpha1.Event{}
+		ke.Spec.Data = map[string]string{
+			"GITHUB_REF": pushEvent.GetRef(),
+		}
+		// TODO remove if not needed
+		ke.Labels = map[string]string{
+			etagLabel: result.ETag.String(),
+		}
+		createEvents = append(createEvents, ke)
+	}
+	return
 }
