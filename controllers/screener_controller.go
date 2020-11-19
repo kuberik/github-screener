@@ -18,7 +18,6 @@ package controllers
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"time"
@@ -70,21 +69,24 @@ func (r *ScreenerReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return *f, err
 	}
 
-	reqLogger.Info("Starting screener")
 	if r.screenerShutdown == nil {
 		r.screenerShutdown = make(map[types.NamespacedName]chan bool)
 	}
+	if r.screenerUpdate == nil {
+		r.screenerUpdate = make(map[types.NamespacedName]chan corev1alpha1.Screener)
+	}
 
 	nn := NamespacedName(&screener)
-	_, newScreener := r.screenerShutdown[nn]
-	if newScreener {
-		r.screenerShutdown[nn] = make(chan bool)
-		r.screenerUpdate[nn] = make(chan corev1alpha1.Screener)
+	_, screenerStarted := r.screenerShutdown[nn]
+	if !screenerStarted {
+		r.screenerShutdown[nn] = make(chan bool, 1)
+		r.screenerUpdate[nn] = make(chan corev1alpha1.Screener, 1)
 	}
 	r.screenerUpdate[nn] <- screener
 
-	if newScreener {
-		go r.StartScreener(nn)
+	if !screenerStarted {
+		reqLogger.Info("Starting screener")
+		go r.RunScreener(nn)
 		return ctrl.Result{}, nil
 	}
 	// Update screener instead
@@ -99,30 +101,47 @@ func (r *ScreenerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func (r *ScreenerReconciler) StartScreener(nn types.NamespacedName) {
+func (r *ScreenerReconciler) RunScreener(nn types.NamespacedName) {
 	poller := NewEventPoller()
 	var screener corev1alpha1.Screener
 	for {
+		reqLogger := r.Log.WithValues("running", &screener)
 		select {
-		case _ = <-r.screenerShutdown[nn]:
-			return
 		case screener = <-r.screenerUpdate[nn]:
+			reqLogger.Info("Update screener")
 			config := &PushScreenerConfig{}
 			ParseScreenerConfig(screener, config)
 			poller.Repo = config.Repo
 			if config.TokenSecret != "" {
 				secret := &v1.Secret{}
-				// TODO retry on error
-				_ = r.Get(context.TODO(), types.NamespacedName{Name: config.TokenSecret, Namespace: screener.Namespace}, secret)
-				token, _ := base64.StdEncoding.DecodeString(string(secret.Data["token"]))
-				poller.Token.AccessToken = string(token)
+				err := r.Get(context.TODO(), types.NamespacedName{Name: config.TokenSecret, Namespace: screener.Namespace}, secret)
+
+				if err != nil {
+					// Skip setting up authentication for now. The section will be called again on 403
+					reqLogger.Error(err, "failed to fetch token secret")
+					continue
+				}
+
+				tokenKey := "token"
+				if _, ok := secret.Data[tokenKey]; ok {
+					poller.Token.AccessToken = string(secret.Data[tokenKey])
+				}
 			}
+		case _ = <-r.screenerShutdown[nn]:
+			reqLogger.Info("Shutdown screener")
+			return
 		default:
+			reqLogger.Info("Poll")
 			result, err := poller.PollOnce()
 			// TODO what to do on error?
-			if err == nil {
-				r.processPollResult(screener, *result)
+			if errors.IsUnauthorized(err) {
+				r.screenerUpdate[nn] <- screener
+			} else if err != nil {
+				time.Sleep(time.Second)
+				reqLogger.Error(err, "failed poll")
+				continue
 			}
+			r.processPollResult(screener, *result)
 			time.Sleep(time.Duration(result.PollInterval) * time.Second)
 		}
 	}
@@ -160,6 +179,7 @@ func (r *ScreenerReconciler) processPollResult(screener corev1alpha1.Screener, r
 		ke := corev1alpha1.NewEvent(screener, map[string]string{
 			"GITHUB_REF": pushEvent.GetRef(),
 		})
+		// TODO remove if not needed
 		ke.Labels[etagLabel] = result.ETag.String()
 		err = r.Create(context.TODO(), &ke)
 		if err != nil {

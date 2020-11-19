@@ -11,3 +11,4 @@ spec:
     repo:
       owner: kuberik
       name: kuberik
+    tokenSecret: sample-screener-github-token
