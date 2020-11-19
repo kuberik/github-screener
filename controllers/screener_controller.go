@@ -153,13 +153,12 @@ func (r *ScreenerReconciler) ShutdownScreener(screener corev1alpha1.Screener) er
 	nn := NamespacedName(&screener)
 	r.screenerShutdown[nn] <- true
 	delete(r.screenerShutdown, nn)
+	delete(r.screenerUpdate, nn)
 	return nil
 }
 
 const (
 	etagLabel = "core.kuberik.io/etag"
-
-	pushEventSuffix = "gh-pe"
 )
 
 func (r *ScreenerReconciler) processPollResult(screener corev1alpha1.Screener, result EventPollResult) {
