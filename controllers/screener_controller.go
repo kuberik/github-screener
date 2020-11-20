@@ -100,7 +100,7 @@ func (r *ScreenerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func populateEvent(screener corev1alpha1.Screener, event *corev1alpha1.Event) {
+func setEventDefaults(screener corev1alpha1.Screener, event *corev1alpha1.Event) {
 	if event.Labels == nil {
 		event.Labels = map[string]string{}
 	}
@@ -112,32 +112,43 @@ func populateEvent(screener corev1alpha1.Screener, event *corev1alpha1.Event) {
 	event.Spec.Movie = screener.Spec.Movie
 }
 
-func (r *ScreenerReconciler) reloadScreener(
+func (r *ScreenerReconciler) rebootScreener(
 	sc ScreenerController,
 	screener corev1alpha1.Screener,
 	eventCreate chan corev1alpha1.Event,
 	reloadScreener chan bool,
+	stopScreener *chan bool,
 ) {
 	reqLogger := r.Log.WithValues("screener", NamespacedName(&screener))
-	reqLogger.Info("updating")
-	if eventCreate != nil {
-		close(eventCreate)
+	reqLogger.Info("loading")
+
+	if *stopScreener != nil {
+		reqLogger.Info("sending stop signal")
+		*stopScreener <- true
+		close(*stopScreener)
+		reqLogger.Info("sent stop signal")
 	}
-	// TODO reduce to less than 100
-	eventCreate = make(chan corev1alpha1.Event, 100)
+	*stopScreener = make(chan bool, 1)
+
 	if err := sc.Update(screener); err != nil {
 		// TODO do exponexntial back-off
 		time.Sleep(5 * time.Second)
 		reloadScreener <- true
 		return
 	}
+
 	reqLogger.Info("restarting")
 	go func() {
+		stop := *stopScreener
 		defer func() { recover(); reqLogger.Info("stopped old version") }()
-		if err := sc.Screen(eventCreate); err != nil {
+		if err := sc.Screen(eventCreate, stop); err != nil {
 			// TODO do exponential back-off
 			time.Sleep(5 * time.Second)
-			reloadScreener <- true
+			select {
+			case _ = <-stop:
+			default:
+				reloadScreener <- true
+			}
 		}
 	}()
 }
@@ -145,16 +156,24 @@ func (r *ScreenerReconciler) reloadScreener(
 func (r *ScreenerReconciler) StartScreener(sc ScreenerController, nn types.NamespacedName) {
 	var screener corev1alpha1.Screener
 	var eventCreate chan corev1alpha1.Event
-	reloadScreener := make(chan bool)
+	reloadScreener := make(chan bool, 1)
+	var stopScreener chan bool
+
 	defer close(reloadScreener)
 
 	reqLogger := r.Log.WithValues("screener", nn)
 	for {
 		select {
 		case _ = <-reloadScreener:
-			r.reloadScreener(sc, screener, eventCreate, reloadScreener)
+			reqLogger.Info("reloading")
+			r.rebootScreener(sc, screener, eventCreate, reloadScreener, &stopScreener)
 		case screener = <-r.screenerUpdate[nn]:
-			r.reloadScreener(sc, screener, eventCreate, reloadScreener)
+			reqLogger.Info("updating")
+			if eventCreate != nil {
+				close(eventCreate)
+			}
+			eventCreate = make(chan corev1alpha1.Event, 1)
+			r.rebootScreener(sc, screener, eventCreate, reloadScreener, &stopScreener)
 		case _ = <-r.screenerShutdown[nn]:
 			close(eventCreate)
 			reqLogger.Info("shutting down")
@@ -162,7 +181,7 @@ func (r *ScreenerReconciler) StartScreener(sc ScreenerController, nn types.Names
 		// TODO think if we need to check if channel is open or closed
 		case event := <-eventCreate:
 			reqLogger.Info("creating events")
-			populateEvent(screener, &event)
+			setEventDefaults(screener, &event)
 			err := r.Create(context.TODO(), &event)
 			if err != nil {
 				// TODO requeue somehow
@@ -205,7 +224,7 @@ func ParseScreenerConfig(screener corev1alpha1.Screener, obj interface{}) error 
 
 type ScreenerController interface {
 	Update(corev1alpha1.Screener) error
-	Screen(chan corev1alpha1.Event) error
+	Screen(chan corev1alpha1.Event, chan bool) error
 }
 
 type PushEventScreenerController struct {
@@ -242,20 +261,25 @@ func (sc *PushEventScreenerController) Update(screener corev1alpha1.Screener) er
 	return nil
 }
 
-func (sc *PushEventScreenerController) Screen(eventCreate chan corev1alpha1.Event) error {
+func (sc *PushEventScreenerController) Screen(eventCreate chan corev1alpha1.Event, stop chan bool) error {
 	for {
-		ctrl.Log.Info("polling")
-		// reqLogger.Info("Poll")
-		result, err := sc.poller.PollOnce()
-		// TODO what to do on error?
-		if err != nil {
-			ctrl.Log.Error(err, "poll error")
-			return err
+		select {
+		case _ = <-stop:
+			ctrl.Log.Info("stopping")
+			return nil
+		default:
+			ctrl.Log.Info("polling")
+			result, err := sc.poller.PollOnce()
+			// TODO what to do on error?
+			if err != nil {
+				ctrl.Log.Error(err, "poll error")
+				return err
+			}
+			for _, e := range sc.processPollResult(*result) {
+				eventCreate <- e
+			}
+			time.Sleep(time.Duration(result.PollInterval) * time.Second)
 		}
-		for _, e := range sc.processPollResult(*result) {
-			eventCreate <- e
-		}
-		time.Sleep(time.Duration(result.PollInterval) * time.Second)
 	}
 }
 
