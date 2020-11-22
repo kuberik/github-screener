@@ -26,6 +26,7 @@ import (
 	"github.com/google/go-github/v32/github"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	ctrl "sigs.k8s.io/controller-runtime"
@@ -87,7 +88,7 @@ func (r *ScreenerReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 	if !screenerStarted {
 		reqLogger.Info("Starting screener")
 		sc := NewPushEventScreenerController(r.Client)
-		go r.StartScreener(&sc, nn)
+		go r.StartScreener(&sc, screener)
 		return ctrl.Result{}, nil
 	}
 
@@ -100,10 +101,18 @@ func (r *ScreenerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-func setEventDefaults(screener corev1alpha1.Screener, event *corev1alpha1.Event) {
-	if event.Labels == nil {
-		event.Labels = map[string]string{}
+func screenerKey(screener corev1alpha1.Screener, key string) string {
+	return fmt.Sprintf("%s/%s", screener.Spec.Class, key)
+}
+
+func eventLabels(screener corev1alpha1.Screener) labels.Set {
+	return labels.Set{
+		screenerKey(screener, "screener"): screener.Name,
 	}
+}
+
+func setEventDefaults(screener corev1alpha1.Screener, event *corev1alpha1.Event) {
+	event.Labels = labels.Merge(event.Labels, eventLabels(screener))
 	if event.Annotations == nil {
 		event.Annotations = map[string]string{}
 	}
@@ -120,13 +129,11 @@ func (r *ScreenerReconciler) rebootScreener(
 	stopScreener *chan bool,
 ) {
 	reqLogger := r.Log.WithValues("screener", NamespacedName(&screener))
-	reqLogger.Info("loading")
 
 	if *stopScreener != nil {
-		reqLogger.Info("sending stop signal")
+		reqLogger.Info("sending stop signal to old screener process")
 		*stopScreener <- true
 		close(*stopScreener)
-		reqLogger.Info("sent stop signal")
 	}
 	*stopScreener = make(chan bool, 1)
 
@@ -140,7 +147,6 @@ func (r *ScreenerReconciler) rebootScreener(
 	reqLogger.Info("restarting")
 	go func() {
 		stop := *stopScreener
-		defer func() { recover(); reqLogger.Info("stopped old version") }()
 		if err := sc.Screen(eventCreate, stop); err != nil {
 			// TODO do exponential back-off
 			time.Sleep(5 * time.Second)
@@ -153,11 +159,25 @@ func (r *ScreenerReconciler) rebootScreener(
 	}()
 }
 
-func (r *ScreenerReconciler) StartScreener(sc ScreenerController, nn types.NamespacedName) {
-	var screener corev1alpha1.Screener
+func (r *ScreenerReconciler) lastEvent(screener corev1alpha1.Screener) (last *corev1alpha1.Event) {
+	var eventList corev1alpha1.EventList
+	r.List(context.TODO(), &eventList, &client.ListOptions{
+		LabelSelector: labels.SelectorFromSet(labels.Set{}),
+	})
+	for i, e := range eventList.Items {
+		if last == nil || e.CreationTimestamp.After(last.CreationTimestamp.Time) {
+			last = &eventList.Items[i]
+		}
+	}
+	return
+}
+
+func (r *ScreenerReconciler) StartScreener(sc ScreenerController, screener corev1alpha1.Screener) {
+	nn := NamespacedName(&screener)
 	var eventCreate chan corev1alpha1.Event
 	reloadScreener := make(chan bool, 1)
 	var stopScreener chan bool
+	lastEvent := r.lastEvent(screener)
 
 	defer close(reloadScreener)
 
@@ -169,10 +189,11 @@ func (r *ScreenerReconciler) StartScreener(sc ScreenerController, nn types.Names
 			r.rebootScreener(sc, screener, eventCreate, reloadScreener, &stopScreener)
 		case screener = <-r.screenerUpdate[nn]:
 			reqLogger.Info("updating")
-			if eventCreate != nil {
-				close(eventCreate)
-			}
 			eventCreate = make(chan corev1alpha1.Event, 1)
+			if lastEvent != nil {
+				reqLogger.Info("recovering")
+				sc.Recover(*lastEvent)
+			}
 			r.rebootScreener(sc, screener, eventCreate, reloadScreener, &stopScreener)
 		case _ = <-r.screenerShutdown[nn]:
 			close(eventCreate)
@@ -180,12 +201,13 @@ func (r *ScreenerReconciler) StartScreener(sc ScreenerController, nn types.Names
 			return
 		// TODO think if we need to check if channel is open or closed
 		case event := <-eventCreate:
+			lastEvent = event.DeepCopy()
 			reqLogger.Info("creating events")
 			setEventDefaults(screener, &event)
 			err := r.Create(context.TODO(), &event)
 			if err != nil {
 				// TODO requeue somehow
-				reqLogger.Info("Failed to create event")
+				reqLogger.Error(err, "Failed to create event")
 			}
 		}
 	}
@@ -225,6 +247,7 @@ func ParseScreenerConfig(screener corev1alpha1.Screener, obj interface{}) error 
 type ScreenerController interface {
 	Update(corev1alpha1.Screener) error
 	Screen(chan corev1alpha1.Event, chan bool) error
+	Recover(corev1alpha1.Event) error
 }
 
 type PushEventScreenerController struct {
@@ -265,6 +288,7 @@ func (sc *PushEventScreenerController) Screen(eventCreate chan corev1alpha1.Even
 	for {
 		select {
 		case _ = <-stop:
+			close(eventCreate)
 			ctrl.Log.Info("stopping")
 			return nil
 		default:
@@ -275,13 +299,21 @@ func (sc *PushEventScreenerController) Screen(eventCreate chan corev1alpha1.Even
 				ctrl.Log.Error(err, "poll error")
 				return err
 			}
-			for _, e := range sc.processPollResult(*result) {
-				eventCreate <- e
+			results := sc.processPollResult(*result)
+			for i := range results {
+				// Create oldest events first
+				eventCreate <- results[len(results)-i-1]
 			}
 			time.Sleep(time.Duration(result.PollInterval) * time.Second)
 		}
 	}
 }
+
+const (
+	eventIDKey         = "GITHUB_EVENT_ID"
+	eventRefKey        = "GITHUB_REF"
+	eventCommitHashKey = "GITHUB_COMMIT_HASH"
+)
 
 func (sc *PushEventScreenerController) processPollResult(result EventPollResult) (createEvents []corev1alpha1.Event) {
 	for _, e := range result.Events {
@@ -299,7 +331,9 @@ func (sc *PushEventScreenerController) processPollResult(result EventPollResult)
 
 		ke := corev1alpha1.Event{}
 		ke.Spec.Data = map[string]string{
-			"GITHUB_REF": pushEvent.GetRef(),
+			eventIDKey:         *e.ID,
+			eventRefKey:        pushEvent.GetRef(),
+			eventCommitHashKey: *pushEvent.Head,
 		}
 		// TODO remove if not needed
 		ke.Labels = map[string]string{
@@ -308,4 +342,9 @@ func (sc *PushEventScreenerController) processPollResult(result EventPollResult)
 		createEvents = append(createEvents, ke)
 	}
 	return
+}
+
+func (sc *PushEventScreenerController) Recover(event corev1alpha1.Event) error {
+	sc.poller.checkpoint = event.Spec.Data[eventIDKey]
+	return nil
 }
