@@ -31,8 +31,9 @@ type ScreenerSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
 
+	Class string `json:"class"`
+	Type  string `json:"type"`
 	// Movie is referencing a Movie for which this Screener creates Events
-	Class  ScreenerClass        `json:"class"`
 	Movie  string               `json:"movie"`
 	Config runtime.RawExtension `json:"config"`
 }
