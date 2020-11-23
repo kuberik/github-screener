@@ -23,8 +23,6 @@ import (
 	"time"
 
 	"github.com/go-logr/logr"
-	"github.com/google/go-github/v32/github"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -34,14 +32,26 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 
 	corev1alpha1 "github.com/kuberik/github-screener/api/v1alpha1"
-	"github.com/kuberik/github-screener/controllers/reconciler"
 )
+
+type ScreenerOperator interface {
+	Update(corev1alpha1.Screener) error
+	Screen(chan corev1alpha1.Event, chan bool) error
+	Recover(corev1alpha1.Event) error
+}
+
+type ScreenerOperatorProducer struct {
+	Type string
+	New  func(client.Client, logr.Logger) ScreenerOperator
+}
 
 // ScreenerReconciler reconciles a Screener object
 type ScreenerReconciler struct {
 	client.Client
 	Log    logr.Logger
 	Scheme *runtime.Scheme
+
+	ScreenerOperatorProducers []ScreenerOperatorProducer
 
 	screenerShutdown map[types.NamespacedName]chan bool
 	screenerUpdate   map[types.NamespacedName]chan corev1alpha1.Screener
@@ -65,9 +75,8 @@ func (r *ScreenerReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 		return ctrl.Result{}, err
 	}
 
-	f, err := reconciler.FinalizerResult(r, screener)
-	if f != nil {
-		return *f, err
+	if fr, err := r.FinalizerResult(screener); fr != nil {
+		return *fr, err
 	}
 
 	if r.screenerShutdown == nil {
@@ -87,9 +96,14 @@ func (r *ScreenerReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 	if !screenerStarted {
 		reqLogger.Info("Starting screener")
-		sc := NewPushEventScreenerController(r.Client)
-		go r.StartScreener(&sc, screener)
-		return ctrl.Result{}, nil
+		for _, p := range r.ScreenerOperatorProducers {
+			if p.Type == screener.Spec.Type {
+				sc := p.New(r.Client, reqLogger)
+				go r.StartScreener(sc, screener)
+				return ctrl.Result{}, nil
+			}
+		}
+		// TODO update status of screener and log error
 	}
 
 	return ctrl.Result{}, nil
@@ -99,6 +113,67 @@ func (r *ScreenerReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&corev1alpha1.Screener{}).
 		Complete(r)
+}
+
+const screenerFinalizer = "finalizer.screener.kuberik.io"
+
+func (r *ScreenerReconciler) addFinalizer(screener controllerutil.Object) error {
+	// TODO
+	// reqLogger := s.WithValues("screenerfinalizeadd")
+	// TODOs
+	// reqLogger.Info("Adding Finalizer for the Screener")
+	controllerutil.AddFinalizer(screener, screenerFinalizer)
+
+	// Update CR
+	err := r.Update(context.TODO(), screener)
+	if err != nil {
+		// TODO
+		// reqLogger.Error(err, "Failed to update screener with finalizer")
+		return err
+	}
+	return nil
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+func (r *ScreenerReconciler) FinalizerResult(screener corev1alpha1.Screener) (*ctrl.Result, error) {
+	// Check if the Screener instance is marked to be deleted, which is
+	// indicated by the deletion timestamp being set.
+	isScreenerMarkedToBeDeleted := screener.GetDeletionTimestamp() != nil
+	if isScreenerMarkedToBeDeleted {
+		if contains(screener.GetFinalizers(), screenerFinalizer) {
+			// Run finalization logic for screenerFinalizer. If the
+			// finalization logic fails, don't remove the finalizer so
+			// that we can retry during the next reconciliation.
+			if err := r.ShutdownScreener(screener); err != nil {
+				return &ctrl.Result{}, err
+			}
+
+			// Remove screenerFinalizer. Once all finalizers have been
+			// removed, the object will be deleted.
+			controllerutil.RemoveFinalizer(&screener, screenerFinalizer)
+			err := r.Update(context.TODO(), &screener)
+			if err != nil {
+				return &ctrl.Result{}, err
+			}
+		}
+		return &ctrl.Result{}, nil
+	}
+
+	// Add finalizer for this CR
+	if !contains(screener.GetFinalizers(), screenerFinalizer) {
+		if err := r.addFinalizer(&screener); err != nil {
+			return &ctrl.Result{}, err
+		}
+	}
+	return nil, nil
 }
 
 func screenerKey(screener corev1alpha1.Screener, key string) string {
@@ -122,7 +197,7 @@ func setEventDefaults(screener corev1alpha1.Screener, event *corev1alpha1.Event)
 }
 
 func (r *ScreenerReconciler) rebootScreener(
-	sc ScreenerController,
+	sc ScreenerOperator,
 	screener corev1alpha1.Screener,
 	eventCreate chan corev1alpha1.Event,
 	reloadScreener chan bool,
@@ -172,7 +247,7 @@ func (r *ScreenerReconciler) lastEvent(screener corev1alpha1.Screener) (last *co
 	return
 }
 
-func (r *ScreenerReconciler) StartScreener(sc ScreenerController, screener corev1alpha1.Screener) {
+func (r *ScreenerReconciler) StartScreener(sc ScreenerOperator, screener corev1alpha1.Screener) {
 	nn := NamespacedName(&screener)
 	var eventCreate chan corev1alpha1.Event
 	reloadScreener := make(chan bool, 1)
@@ -227,124 +302,10 @@ func (r *ScreenerReconciler) ShutdownScreener(screener corev1alpha1.Screener) er
 	return nil
 }
 
-const (
-	etagLabel = "github.screeners.kuberik.io/etag"
-)
-
 func NamespacedName(object controllerutil.Object) types.NamespacedName {
 	return types.NamespacedName{Namespace: object.GetNamespace(), Name: object.GetName()}
 }
 
-type PushScreenerConfig struct {
-	Repo        `json:"repo"`
-	TokenSecret string `json:"tokenSecret"`
-}
-
 func ParseScreenerConfig(screener corev1alpha1.Screener, obj interface{}) error {
 	return json.Unmarshal(screener.Spec.Config.Raw, obj)
-}
-
-type ScreenerController interface {
-	Update(corev1alpha1.Screener) error
-	Screen(chan corev1alpha1.Event, chan bool) error
-	Recover(corev1alpha1.Event) error
-}
-
-type PushEventScreenerController struct {
-	poller EventPoller
-	client.Client
-}
-
-func NewPushEventScreenerController(client client.Client) PushEventScreenerController {
-	return PushEventScreenerController{
-		poller: NewEventPoller(),
-		Client: client,
-	}
-}
-
-func (sc *PushEventScreenerController) Update(screener corev1alpha1.Screener) error {
-	config := &PushScreenerConfig{}
-	ParseScreenerConfig(screener, config)
-	sc.poller.Repo = config.Repo
-	if config.TokenSecret != "" {
-		secret := &v1.Secret{}
-		err := sc.Get(context.TODO(), types.NamespacedName{Name: config.TokenSecret, Namespace: screener.Namespace}, secret)
-
-		if err != nil {
-			// Skip setting up authentication for now. The function will be called again on 403
-			// reqLogger.Error(err, "failed to fetch token secret")
-			return err
-		}
-
-		tokenKey := "token"
-		if _, ok := secret.Data[tokenKey]; ok {
-			sc.poller.Token.AccessToken = string(secret.Data[tokenKey])
-		}
-	}
-	return nil
-}
-
-func (sc *PushEventScreenerController) Screen(eventCreate chan corev1alpha1.Event, stop chan bool) error {
-	for {
-		select {
-		case _ = <-stop:
-			close(eventCreate)
-			ctrl.Log.Info("stopping")
-			return nil
-		default:
-			ctrl.Log.Info("polling")
-			result, err := sc.poller.PollOnce()
-			// TODO what to do on error?
-			if err != nil {
-				ctrl.Log.Error(err, "poll error")
-				return err
-			}
-			results := sc.processPollResult(*result)
-			for i := range results {
-				// Create oldest events first
-				eventCreate <- results[len(results)-i-1]
-			}
-			time.Sleep(time.Duration(result.PollInterval) * time.Second)
-		}
-	}
-}
-
-const (
-	eventIDKey         = "GITHUB_EVENT_ID"
-	eventRefKey        = "GITHUB_REF"
-	eventCommitHashKey = "GITHUB_COMMIT_HASH"
-)
-
-func (sc *PushEventScreenerController) processPollResult(result EventPollResult) (createEvents []corev1alpha1.Event) {
-	for _, e := range result.Events {
-		payload, err := e.ParsePayload()
-		if err != nil {
-			ctrl.Log.Error(err, fmt.Sprintf("Failed to parse an event %s/%s#%s", e.GetRepo().GetOwner(), e.GetRepo().GetName(), e.GetID()))
-			continue
-		}
-
-		pushEvent, ok := payload.(*github.PushEvent)
-		if !ok {
-			ctrl.Log.Info("Skipping event", "type", e.GetType())
-			continue
-		}
-
-		ke := corev1alpha1.Event{}
-		ke.Spec.Data = map[string]string{
-			eventIDKey:         *e.ID,
-			eventRefKey:        pushEvent.GetRef(),
-			eventCommitHashKey: *pushEvent.Head,
-		}
-		// TODO remove if not needed
-		ke.Labels = map[string]string{
-			etagLabel: result.ETag.String(),
-		}
-		createEvents = append(createEvents, ke)
-	}
-	return
-}
-
-func (sc *PushEventScreenerController) Recover(event corev1alpha1.Event) error {
-	sc.poller.checkpoint = event.Spec.Data[eventIDKey]
-	return nil
 }
