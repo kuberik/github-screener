@@ -37,6 +37,7 @@ func (sc *PushEventScreenerOperator) Update(screener corev1alpha1.Screener) erro
 	config := &PushScreenerConfig{}
 	controllers.ParseScreenerConfig(screener, config)
 	sc.poller.Repo = config.Repo
+	sc.poller.Start = screener.CreationTimestamp.Time
 	if config.TokenSecret != "" {
 		secret := &v1.Secret{}
 		err := sc.Get(context.TODO(), types.NamespacedName{Name: config.TokenSecret, Namespace: screener.Namespace}, secret)
@@ -118,6 +119,6 @@ func (sc *PushEventScreenerOperator) processPollResult(result EventPollResult) (
 }
 
 func (sc *PushEventScreenerOperator) Recover(event corev1alpha1.Event) error {
-	sc.poller.checkpoint = event.Spec.Data[eventIDKey]
+	sc.poller.Checkpoint = event.Spec.Data[eventIDKey]
 	return nil
 }

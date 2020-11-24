@@ -3,6 +3,7 @@ package operators
 import (
 	"context"
 	"regexp"
+	"time"
 
 	"github.com/google/go-github/v32/github"
 	"github.com/m4ns0ur/httpcache"
@@ -35,7 +36,8 @@ type EventPoller struct {
 	*github.Client
 	Repo       Repo
 	Token      *oauth2.Token
-	checkpoint string
+	Checkpoint string
+	Start      time.Time
 }
 
 func NewEventPoller() EventPoller {
@@ -59,13 +61,14 @@ func (p *EventPoller) PollOnce() (*EventPollResult, error) {
 	}
 
 	for i, e := range events {
-		if *e.ID == p.checkpoint {
+		if *e.ID == p.Checkpoint || e.CreatedAt.Before(p.Start) {
 			events = events[0:i]
+			break
 		}
 	}
 
 	if len(events) > 0 {
-		p.checkpoint = *events[0].ID
+		p.Checkpoint = *events[0].ID
 	}
 
 	pollInterval, err := strconv.Atoi(response.Header.Get("X-Poll-Interval"))
