@@ -227,6 +227,7 @@ func (r *ScreenerReconciler) rebootScreener(
 			time.Sleep(5 * time.Second)
 			select {
 			case _ = <-stop:
+				close(eventCreate)
 			default:
 				reloadScreener <- true
 			}
@@ -271,7 +272,8 @@ func (r *ScreenerReconciler) StartScreener(sc ScreenerOperator, screener corev1a
 			}
 			r.rebootScreener(sc, screener, eventCreate, reloadScreener, &stopScreener)
 		case _ = <-r.screenerShutdown[nn]:
-			close(eventCreate)
+			stopScreener <- true
+			close(stopScreener)
 			reqLogger.Info("shutting down")
 			return
 		// TODO think if we need to check if channel is open or closed
