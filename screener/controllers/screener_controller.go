@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -241,7 +242,13 @@ func (r *ScreenerReconciler) lastEvent(screener corev1alpha1.Screener) (last *co
 		LabelSelector: labels.SelectorFromSet(labels.Set{}),
 	})
 	for i, e := range eventList.Items {
-		if last == nil || e.CreationTimestamp.After(last.CreationTimestamp.Time) {
+		if last == nil {
+			last = &eventList.Items[i]
+			continue
+		}
+		rvc, _ := strconv.Atoi(e.ResourceVersion)
+		rvl, _ := strconv.Atoi(last.ResourceVersion)
+		if rvc > rvl {
 			last = &eventList.Items[i]
 		}
 	}
