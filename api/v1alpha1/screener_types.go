@@ -38,15 +38,6 @@ type ScreenerSpec struct {
 	Config runtime.RawExtension `json:"config"`
 }
 
-type ScreenerClass struct {
-	// Name identifier of the screener class
-	// E.g. screeners.kuberik.io/github
-	Name string `json:"name"`
-	// Type of the Screener to configure
-	// E.g. push
-	Type string `json:"type"`
-}
-
 // ScreenerStatus defines the observed state of Screener
 type ScreenerStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
