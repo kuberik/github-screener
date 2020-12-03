@@ -4,9 +4,8 @@ metadata:
   name: push-screener
 spec:
   movie: kuberik-ci
-  class:
-    name: screeners.kuberik.io/github
-    type: Push
+  class: screeners.kuberik.io/github
+  type: Push
   config:
     repo:
       owner: kuberik
