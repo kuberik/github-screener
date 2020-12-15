@@ -2,7 +2,6 @@ package operators
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -14,17 +13,54 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
+const (
+	eventIDKey         = "GITHUB_EVENT_ID"
+	eventRefKey        = "GITHUB_REF"
+	eventCommitHashKey = "GITHUB_COMMIT_HASH"
+
+	etagLabel = "github.screeners.kuberik.io/etag"
+)
+
+type pushPollEventCollector struct {
+	client *github.Client
+}
+
+func (c pushPollEventCollector) Collect(e *github.Event, payload interface{}) (*corev1alpha1.Event, error) {
+	ke, _ := DefaultPollEventCollector.Collect(e, payload)
+
+	switch p := payload.(type) {
+	case *github.PushEvent:
+		ke.Spec.Data[eventRefKey] = p.GetRef()
+		ke.Spec.Data[eventCommitHashKey] = *p.Head
+	case *github.CreateEvent:
+		ref, _, err := c.client.Git.GetRef(context.TODO(), *p.Repo.Owner.Name, *p.Repo.Name, p.GetRef())
+		if err != nil {
+			return nil, err
+		}
+		ke.Spec.Data[eventRefKey] = p.GetRef()
+		ke.Spec.Data[eventCommitHashKey] = *ref.Object.SHA
+	default:
+		return nil, nil
+	}
+
+	return ke, nil
+}
+
 type PushEventScreenerOperator struct {
-	poller EventPoller
+	EventPoller
 	client.Client
 	Log logr.Logger
 }
 
 func NewPushEventScreenerOperator(client client.Client, log logr.Logger) controllers.ScreenerOperator {
+	poller := NewEventPoller()
+	poller.PollEventCollector = pushPollEventCollector{
+		client: poller.Client,
+	}
 	return &PushEventScreenerOperator{
-		poller: NewEventPoller(),
-		Client: client,
-		Log:    log,
+		EventPoller: poller,
+		Client:      client,
+		Log:         log,
 	}
 }
 
@@ -36,7 +72,7 @@ type PushScreenerConfig struct {
 func (sc *PushEventScreenerOperator) Update(screener corev1alpha1.Screener) error {
 	config := &PushScreenerConfig{}
 	controllers.ParseScreenerConfig(screener, config)
-	sc.poller.Repo = config.Repo
+	sc.Repo = config.Repo
 	if config.TokenSecret != "" {
 		secret := &v1.Secret{}
 		err := sc.Get(context.TODO(), types.NamespacedName{Name: config.TokenSecret, Namespace: screener.Namespace}, secret)
@@ -49,7 +85,7 @@ func (sc *PushEventScreenerOperator) Update(screener corev1alpha1.Screener) erro
 
 		tokenKey := "token"
 		if _, ok := secret.Data[tokenKey]; ok {
-			sc.poller.Token.AccessToken = string(secret.Data[tokenKey])
+			sc.Token.AccessToken = string(secret.Data[tokenKey])
 		}
 	}
 	return nil
@@ -64,60 +100,21 @@ func (sc *PushEventScreenerOperator) Screen(eventCreate chan corev1alpha1.Event,
 			return nil
 		default:
 			sc.Log.Info("polling")
-			result, err := sc.poller.PollOnce()
-			// TODO what to do on error?
+			result, err := sc.PollOnce()
+			// TODO: what to do on error?
 			if err != nil {
 				sc.Log.Error(err, "poll error")
-				return err
+				continue
 			}
-			results := sc.processPollResult(*result)
-			for i := range results {
-				// Create oldest events first
-				eventCreate <- results[len(results)-i-1]
+			for _, e := range result.Events {
+				eventCreate <- e
 			}
 			time.Sleep(time.Duration(result.PollInterval) * time.Second)
 		}
 	}
 }
 
-const (
-	eventIDKey         = "GITHUB_EVENT_ID"
-	eventRefKey        = "GITHUB_REF"
-	eventCommitHashKey = "GITHUB_COMMIT_HASH"
-
-	etagLabel = "github.screeners.kuberik.io/etag"
-)
-
-func (sc *PushEventScreenerOperator) processPollResult(result EventPollResult) (createEvents []corev1alpha1.Event) {
-	for _, e := range result.Events {
-		payload, err := e.ParsePayload()
-		if err != nil {
-			sc.Log.Error(err, fmt.Sprintf("Failed to parse an event %s/%s#%s", e.GetRepo().GetOwner(), e.GetRepo().GetName(), e.GetID()))
-			continue
-		}
-
-		pushEvent, ok := payload.(*github.PushEvent)
-		if !ok {
-			sc.Log.Info("Skipping event", "type", e.GetType())
-			continue
-		}
-
-		ke := corev1alpha1.Event{}
-		ke.Spec.Data = map[string]string{
-			eventIDKey:         *e.ID,
-			eventRefKey:        pushEvent.GetRef(),
-			eventCommitHashKey: *pushEvent.Head,
-		}
-		// TODO remove if not needed
-		ke.Labels = map[string]string{
-			etagLabel: result.ETag.String(),
-		}
-		createEvents = append(createEvents, ke)
-	}
-	return
-}
-
 func (sc *PushEventScreenerOperator) Recover(event corev1alpha1.Event) error {
-	sc.poller.checkpoint = event.Spec.Data[eventIDKey]
+	sc.checkpoint = event.Spec.Data[eventIDKey]
 	return nil
 }

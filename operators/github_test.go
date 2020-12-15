@@ -1,6 +1,7 @@
 package operators
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"testing"
@@ -8,6 +9,19 @@ import (
 	"github.com/google/go-github/v32/github"
 	"github.com/jarcoal/httpmock"
 )
+
+var (
+	mockEventType                    = "PushEvent"
+	mockEventPayload json.RawMessage = []byte("{}")
+)
+
+func mockGithubEvent(id string) github.Event {
+	return github.Event{
+		ID:         &id,
+		Type:       &mockEventType,
+		RawPayload: &mockEventPayload,
+	}
+}
 
 func TestEventPollerPollOnce(t *testing.T) {
 	httpmock.Activate()
@@ -61,9 +75,7 @@ func TestEventPollerPollCache(t *testing.T) {
 	}
 
 	mockEventID := "123456789"
-	mockEvents := []github.Event{
-		{ID: &mockEventID},
-	}
+	mockEvents := []github.Event{mockGithubEvent(mockEventID)}
 	etag := "5f36d139db088e04db015fd8232e28da5679ff4a03add6d5be8532ccbe1db928"
 
 	httpmock.RegisterResponder(
@@ -124,9 +136,7 @@ func TestEventPollerPollTwice(t *testing.T) {
 	}
 
 	mockEventID := "123456789"
-	mockEvents := []github.Event{
-		{ID: &mockEventID},
-	}
+	mockEvents := []github.Event{mockGithubEvent(mockEventID)}
 	etag := "5f36d139db088e04db015fd8232e28da5679ff4a03add6d5be8532ccbe1db928"
 
 	httpmock.RegisterResponder(
@@ -157,7 +167,7 @@ func TestEventPollerPollTwice(t *testing.T) {
 
 	mockEventNewID := "987656432"
 	etag = "22289f995675ee81e38e8579a704733701c42f7ee36197d08ba2d9d29c65424f"
-	mockEvents = []github.Event{{ID: &mockEventNewID}, mockEvents[0]}
+	mockEvents = []github.Event{mockGithubEvent(mockEventNewID), mockEvents[0]}
 
 	pollResult, err = eventPoller.PollOnce()
 	if err != nil {
@@ -166,8 +176,8 @@ func TestEventPollerPollTwice(t *testing.T) {
 	if len(pollResult.Events) != 1 {
 		t.Errorf("Want %d events on poll, but got %d", 1, len(pollResult.Events))
 	}
-	if *pollResult.Events[0].ID != mockEventNewID {
-		t.Errorf("Want event with ID %v, but got event with ID %v", mockEventNewID, *pollResult.Events[0].ID)
+	if pollResult.Events[0].Spec.Data[eventIDKey] != mockEventNewID {
+		t.Errorf("Want event with ID %v, but got event with ID %v", mockEventNewID, pollResult.Events[0].Spec.Data[eventIDKey])
 	}
 	if string(pollResult.ETag) != etag {
 		t.Errorf("Want etag %s, got %s", etag, pollResult.ETag)

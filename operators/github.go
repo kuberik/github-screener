@@ -5,6 +5,7 @@ import (
 	"regexp"
 
 	"github.com/google/go-github/v32/github"
+	corev1alpha1 "github.com/kuberik/github-screener/api/v1alpha1"
 	"github.com/m4ns0ur/httpcache"
 	"golang.org/x/oauth2"
 
@@ -19,8 +20,8 @@ func init() {
 	cache = httpcache.NewMemoryCache()
 }
 
-// NewClient returns a new cacheable GitHub client
-func NewClient() (*github.Client, *oauth2.Token) {
+// NewGithubClient returns a new cacheable GitHub client
+func NewGithubClient() (*github.Client, *oauth2.Token) {
 	httpCacheClient := httpcache.NewTransport(cache).Client()
 
 	ctx := context.WithValue(context.TODO(), oauth2.HTTPClient, httpCacheClient)
@@ -31,23 +32,41 @@ func NewClient() (*github.Client, *oauth2.Token) {
 	return github.NewClient(tc), oauthToken
 }
 
+type PollEventCollector interface {
+	Collect(*github.Event, interface{}) (*corev1alpha1.Event, error)
+}
+
+type defaultPollEventCollector struct{}
+
+func (_ defaultPollEventCollector) Collect(e *github.Event, payload interface{}) (*corev1alpha1.Event, error) {
+	ke := &corev1alpha1.Event{}
+	ke.Spec.Data = map[string]string{
+		eventIDKey: *e.ID,
+	}
+	return ke, nil
+}
+
+var DefaultPollEventCollector PollEventCollector = defaultPollEventCollector{}
+
 type EventPoller struct {
 	*github.Client
 	Repo       Repo
 	Token      *oauth2.Token
 	checkpoint string
+	PollEventCollector
 }
 
 func NewEventPoller() EventPoller {
-	client, oauthToken := NewClient()
+	client, oauthToken := NewGithubClient()
 	return EventPoller{
-		Client: client,
-		Token:  oauthToken,
+		PollEventCollector: DefaultPollEventCollector,
+		Client:             client,
+		Token:              oauthToken,
 	}
 }
 
 type EventPollResult struct {
-	Events       []*github.Event
+	Events       []corev1alpha1.Event
 	ETag         ETag
 	PollInterval int
 }
@@ -58,14 +77,27 @@ func (p *EventPoller) PollOnce() (*EventPollResult, error) {
 		return nil, err
 	}
 
+	checkpointIndex := len(events)
 	for i, e := range events {
 		if *e.ID == p.checkpoint {
-			events = events[0:i]
+			checkpointIndex = i
+			break
 		}
 	}
 
-	if len(events) > 0 {
-		p.checkpoint = *events[0].ID
+	var collectedEvents []corev1alpha1.Event
+	for i := checkpointIndex - 1; i >= 0; i-- {
+		payload, err := events[i].ParsePayload()
+		if err != nil {
+			return nil, err
+		}
+		e, err := p.Collect(events[i], payload)
+		if err != nil {
+			break
+		} else if e != nil {
+			collectedEvents = append(collectedEvents, *e)
+			p.checkpoint = *events[i].ID
+		}
 	}
 
 	pollInterval, err := strconv.Atoi(response.Header.Get("X-Poll-Interval"))
@@ -74,7 +106,7 @@ func (p *EventPoller) PollOnce() (*EventPollResult, error) {
 	}
 
 	return &EventPollResult{
-		Events: events,
+		Events: collectedEvents,
 		// returns only first 63 characters of etag, since no more can fit in a label
 		ETag:         ETag(regexp.MustCompile("\\w{2,}").FindString(response.Header.Get("ETag"))),
 		PollInterval: pollInterval,
