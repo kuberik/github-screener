@@ -290,7 +290,7 @@ func (r *ScreenerReconciler) StartScreener(sc ScreenerOperator, screener corev1a
 			setEventDefaults(screener, &event)
 			err := r.Create(context.TODO(), &event)
 			if err != nil {
-				// TODO requeue somehow
+				// TODO: KUB-97 requeue somehow
 				reqLogger.Error(err, "Failed to create event")
 			}
 		}
