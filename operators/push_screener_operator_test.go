@@ -73,13 +73,17 @@ var pushPollEventCollectorTests = []struct {
 		}{{
 			method: "GET",
 			url: fmt.Sprintf(
-				"https://api.github.com/repos/%s/%s/git/ref/%s",
+				"https://api.github.com/repos/%s/%s/branches/%s",
 				pushPollEventCollectorEventTemplate.repoOwner,
 				pushPollEventCollectorEventTemplate.repoName,
 				pushPollEventCollectorEventTemplate.ref,
 			),
 			responder: func(req *http.Request) (*http.Response, error) {
-				body := github.Reference{Object: &github.GitObject{SHA: &pushPollEventCollectorEventTemplate.hash}}
+				body := github.Branch{
+					Commit: &github.RepositoryCommit{
+						SHA: &pushPollEventCollectorEventTemplate.hash,
+					},
+				}
 				resp, _ := httpmock.NewJsonResponse(200, body)
 				return resp, nil
 			},

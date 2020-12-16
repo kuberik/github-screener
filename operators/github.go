@@ -5,6 +5,7 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/go-logr/logr"
 	"github.com/google/go-github/v32/github"
 	corev1alpha1 "github.com/kuberik/github-screener/api/v1alpha1"
 	"github.com/m4ns0ur/httpcache"
@@ -50,6 +51,7 @@ func (_ defaultPollEventCollector) Collect(e *github.Event, payload interface{})
 var DefaultPollEventCollector PollEventCollector = defaultPollEventCollector{}
 
 type EventPoller struct {
+	log logr.Logger
 	*github.Client
 	Repo       Repo
 	Token      *oauth2.Token
@@ -95,6 +97,7 @@ func (p *EventPoller) PollOnce() (*EventPollResult, error) {
 		}
 		e, err := p.Collect(events[i], payload)
 		if err != nil {
+			p.log.Error(err, "failed to process event", "id", *events[i].ID)
 			break
 		} else if e != nil {
 			collectedEvents = append(collectedEvents, *e)

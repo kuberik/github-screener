@@ -36,12 +36,12 @@ func (c pushPollEventCollector) Collect(e *github.Event, payload interface{}) (*
 	case *github.CreateEvent:
 		fullRepoNameSplit := strings.Split(*e.Repo.Name, "/")
 		repo := Repo{Owner: fullRepoNameSplit[0], Name: fullRepoNameSplit[1]}
-		ref, _, err := c.client.Git.GetRef(context.TODO(), repo.Owner, repo.Name, p.GetRef())
+		branch, _, err := c.client.Repositories.GetBranch(context.TODO(), repo.Owner, repo.Name, p.GetRef())
 		if err != nil {
 			return nil, err
 		}
 		ke.Spec.Data[eventRefKey] = p.GetRef()
-		ke.Spec.Data[eventCommitHashKey] = *ref.Object.SHA
+		ke.Spec.Data[eventCommitHashKey] = *branch.Commit.SHA
 	default:
 		return nil, nil
 	}
@@ -57,6 +57,7 @@ type PushEventScreenerOperator struct {
 
 func NewPushEventScreenerOperator(client client.Client, log logr.Logger) controllers.ScreenerOperator {
 	poller := NewEventPoller()
+	poller.log = log
 	poller.PollEventCollector = pushPollEventCollector{
 		client: poller.Client,
 	}
