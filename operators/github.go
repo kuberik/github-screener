@@ -3,6 +3,7 @@ package operators
 import (
 	"context"
 	"regexp"
+	"time"
 
 	"github.com/google/go-github/v32/github"
 	corev1alpha1 "github.com/kuberik/github-screener/api/v1alpha1"
@@ -53,6 +54,7 @@ type EventPoller struct {
 	Repo       Repo
 	Token      *oauth2.Token
 	checkpoint string
+	Start      time.Time
 	PollEventCollector
 }
 
@@ -79,7 +81,7 @@ func (p *EventPoller) PollOnce() (*EventPollResult, error) {
 
 	checkpointIndex := len(events)
 	for i, e := range events {
-		if *e.ID == p.checkpoint {
+		if *e.ID == p.checkpoint || e.CreatedAt.Before(p.Start) {
 			checkpointIndex = i
 			break
 		}
