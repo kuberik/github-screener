@@ -4,10 +4,10 @@ metadata:
   name: push-screener
 spec:
   movie: kuberik-ci
-  class: screeners.kuberik.io/github
+  class: github.screeners.kuberik.io
   type: Push
   config:
     repo:
       owner: kuberik
-      name: kuberik
+      name: github-screener
     tokenSecret: sample-screener-github-token

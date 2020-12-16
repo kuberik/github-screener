@@ -73,6 +73,7 @@ func (sc *PushEventScreenerOperator) Update(screener corev1alpha1.Screener) erro
 	config := &PushScreenerConfig{}
 	controllers.ParseScreenerConfig(screener, config)
 	sc.Repo = config.Repo
+	sc.Start = screener.CreationTimestamp.Time
 	if config.TokenSecret != "" {
 		secret := &v1.Secret{}
 		err := sc.Get(context.TODO(), types.NamespacedName{Name: config.TokenSecret, Namespace: screener.Namespace}, secret)
