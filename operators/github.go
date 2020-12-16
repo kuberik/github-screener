@@ -66,6 +66,7 @@ func NewEventPoller() EventPoller {
 		PollEventCollector: DefaultPollEventCollector,
 		Client:             client,
 		Token:              oauthToken,
+		Start:              time.Unix(0, 0),
 	}
 }
 

@@ -5,14 +5,16 @@ import (
 	"fmt"
 	"net/http"
 	"testing"
+	"time"
 
 	"github.com/google/go-github/v32/github"
 	"github.com/jarcoal/httpmock"
 )
 
 var (
-	mockEventType                    = "PushEvent"
-	mockEventPayload json.RawMessage = []byte("{}")
+	mockEventType                      = "PushEvent"
+	mockEventPayload   json.RawMessage = []byte("{}")
+	mockEventCreatedAt                 = time.Now()
 )
 
 func mockGithubEvent(id string) github.Event {
@@ -20,6 +22,7 @@ func mockGithubEvent(id string) github.Event {
 		ID:         &id,
 		Type:       &mockEventType,
 		RawPayload: &mockEventPayload,
+		CreatedAt:  &mockEventCreatedAt,
 	}
 }
 
