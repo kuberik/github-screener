@@ -2,6 +2,8 @@ package operators
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -33,12 +35,14 @@ func (c pushPollEventCollector) Collect(e *github.Event, payload interface{}) (*
 		ke.Spec.Data[eventRefKey] = p.GetRef()
 		ke.Spec.Data[eventCommitHashKey] = *p.Head
 	case *github.CreateEvent:
-		ref, _, err := c.client.Git.GetRef(context.TODO(), *p.Repo.Owner.Name, *p.Repo.Name, p.GetRef())
+		fullRepoNameSplit := strings.Split(*e.Repo.Name, "/")
+		repo := Repo{Owner: fullRepoNameSplit[0], Name: fullRepoNameSplit[1]}
+		branch, _, err := c.client.Repositories.GetBranch(context.TODO(), repo.Owner, repo.Name, p.GetRef())
 		if err != nil {
 			return nil, err
 		}
-		ke.Spec.Data[eventRefKey] = p.GetRef()
-		ke.Spec.Data[eventCommitHashKey] = *ref.Object.SHA
+		ke.Spec.Data[eventRefKey] = fmt.Sprintf("refs/head/%s", p.GetRef())
+		ke.Spec.Data[eventCommitHashKey] = *branch.Commit.SHA
 	default:
 		return nil, nil
 	}
@@ -54,6 +58,7 @@ type PushEventScreenerOperator struct {
 
 func NewPushEventScreenerOperator(client client.Client, log logr.Logger) controllers.ScreenerOperator {
 	poller := NewEventPoller()
+	poller.log = log
 	poller.PollEventCollector = pushPollEventCollector{
 		client: poller.Client,
 	}

@@ -15,12 +15,14 @@ var (
 	pushPollEventCollectorEventTemplate = struct {
 		id        string
 		ref       string
+		branch    string
 		repoName  string
 		repoOwner string
 		hash      string
 	}{
 		id:        "a",
-		ref:       "foo",
+		ref:       "refs/head/foo",
+		branch:    "foo",
 		repoName:  "foo-repo",
 		repoOwner: "foo-owner",
 		hash:      "ab2dc7fcb96e5298446d02dbd22a09bb64af3218",
@@ -32,7 +34,10 @@ var (
 	}}}
 )
 
+var createEventRepoName = fmt.Sprintf("%s/%s", pushPollEventCollectorEventTemplate.repoOwner, pushPollEventCollectorEventTemplate.repoName)
+
 var pushPollEventCollectorTests = []struct {
+	event   github.Event
 	payload interface{}
 	mocks   []struct {
 		method    string
@@ -41,14 +46,21 @@ var pushPollEventCollectorTests = []struct {
 	}
 }{
 	{
+		event: mockGithubEvent(pushPollEventCollectorEventTemplate.id),
 		payload: &github.PushEvent{
 			Ref:  &pushPollEventCollectorEventTemplate.ref,
 			Head: &pushPollEventCollectorEventTemplate.hash,
 		},
 	},
 	{
+		event: github.Event{
+			ID: &pushPollEventCollectorEventTemplate.id,
+			Repo: &github.Repository{
+				Name: &createEventRepoName,
+			},
+		},
 		payload: &github.CreateEvent{
-			Ref: &pushPollEventCollectorEventTemplate.ref,
+			Ref: &pushPollEventCollectorEventTemplate.branch,
 			Repo: &github.Repository{
 				Name: &pushPollEventCollectorEventTemplate.repoName,
 				Owner: &github.User{
@@ -63,13 +75,17 @@ var pushPollEventCollectorTests = []struct {
 		}{{
 			method: "GET",
 			url: fmt.Sprintf(
-				"https://api.github.com/repos/%s/%s/git/ref/%s",
+				"https://api.github.com/repos/%s/%s/branches/%s",
 				pushPollEventCollectorEventTemplate.repoOwner,
 				pushPollEventCollectorEventTemplate.repoName,
-				pushPollEventCollectorEventTemplate.ref,
+				pushPollEventCollectorEventTemplate.branch,
 			),
 			responder: func(req *http.Request) (*http.Response, error) {
-				body := github.Reference{Object: &github.GitObject{SHA: &pushPollEventCollectorEventTemplate.hash}}
+				body := github.Branch{
+					Commit: &github.RepositoryCommit{
+						SHA: &pushPollEventCollectorEventTemplate.hash,
+					},
+				}
 				resp, _ := httpmock.NewJsonResponse(200, body)
 				return resp, nil
 			},
@@ -78,7 +94,6 @@ var pushPollEventCollectorTests = []struct {
 }
 
 func TestPushPollEventCollectorCollect(t *testing.T) {
-	mockEvent := mockGithubEvent(pushPollEventCollectorEventTemplate.id)
 	for i, testCase := range pushPollEventCollectorTests {
 		httpmock.Activate()
 
@@ -88,7 +103,7 @@ func TestPushPollEventCollectorCollect(t *testing.T) {
 
 		client, _ := NewGithubClient()
 		collector := pushPollEventCollector{client: client}
-		e, err := collector.Collect(&mockEvent, testCase.payload)
+		e, err := collector.Collect(&testCase.event, testCase.payload)
 		if err != nil {
 			t.Errorf("testcase %d: failed to collect event: %s", i, err)
 		} else if !reflect.DeepEqual(*e, pushPollEventCollectorEventWant) {
