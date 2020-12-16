@@ -15,12 +15,14 @@ var (
 	pushPollEventCollectorEventTemplate = struct {
 		id        string
 		ref       string
+		branch    string
 		repoName  string
 		repoOwner string
 		hash      string
 	}{
 		id:        "a",
-		ref:       "foo",
+		ref:       "refs/head/foo",
+		branch:    "foo",
 		repoName:  "foo-repo",
 		repoOwner: "foo-owner",
 		hash:      "ab2dc7fcb96e5298446d02dbd22a09bb64af3218",
@@ -58,7 +60,7 @@ var pushPollEventCollectorTests = []struct {
 			},
 		},
 		payload: &github.CreateEvent{
-			Ref: &pushPollEventCollectorEventTemplate.ref,
+			Ref: &pushPollEventCollectorEventTemplate.branch,
 			Repo: &github.Repository{
 				Name: &pushPollEventCollectorEventTemplate.repoName,
 				Owner: &github.User{
@@ -76,7 +78,7 @@ var pushPollEventCollectorTests = []struct {
 				"https://api.github.com/repos/%s/%s/branches/%s",
 				pushPollEventCollectorEventTemplate.repoOwner,
 				pushPollEventCollectorEventTemplate.repoName,
-				pushPollEventCollectorEventTemplate.ref,
+				pushPollEventCollectorEventTemplate.branch,
 			),
 			responder: func(req *http.Request) (*http.Response, error) {
 				body := github.Branch{

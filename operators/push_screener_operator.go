@@ -2,6 +2,7 @@ package operators
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
@@ -40,7 +41,7 @@ func (c pushPollEventCollector) Collect(e *github.Event, payload interface{}) (*
 		if err != nil {
 			return nil, err
 		}
-		ke.Spec.Data[eventRefKey] = p.GetRef()
+		ke.Spec.Data[eventRefKey] = fmt.Sprintf("refs/head/%s", p.GetRef())
 		ke.Spec.Data[eventCommitHashKey] = *branch.Commit.SHA
 	default:
 		return nil, nil
