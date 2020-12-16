@@ -2,6 +2,7 @@ package operators
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -33,7 +34,9 @@ func (c pushPollEventCollector) Collect(e *github.Event, payload interface{}) (*
 		ke.Spec.Data[eventRefKey] = p.GetRef()
 		ke.Spec.Data[eventCommitHashKey] = *p.Head
 	case *github.CreateEvent:
-		ref, _, err := c.client.Git.GetRef(context.TODO(), *p.Repo.Owner.Name, *p.Repo.Name, p.GetRef())
+		fullRepoNameSplit := strings.Split(*e.Repo.Name, "/")
+		repo := Repo{Owner: fullRepoNameSplit[0], Name: fullRepoNameSplit[1]}
+		ref, _, err := c.client.Git.GetRef(context.TODO(), repo.Owner, repo.Name, p.GetRef())
 		if err != nil {
 			return nil, err
 		}

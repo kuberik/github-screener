@@ -32,7 +32,10 @@ var (
 	}}}
 )
 
+var createEventRepoName = fmt.Sprintf("%s/%s", pushPollEventCollectorEventTemplate.repoOwner, pushPollEventCollectorEventTemplate.repoName)
+
 var pushPollEventCollectorTests = []struct {
+	event   github.Event
 	payload interface{}
 	mocks   []struct {
 		method    string
@@ -41,12 +44,19 @@ var pushPollEventCollectorTests = []struct {
 	}
 }{
 	{
+		event: mockGithubEvent(pushPollEventCollectorEventTemplate.id),
 		payload: &github.PushEvent{
 			Ref:  &pushPollEventCollectorEventTemplate.ref,
 			Head: &pushPollEventCollectorEventTemplate.hash,
 		},
 	},
 	{
+		event: github.Event{
+			ID: &pushPollEventCollectorEventTemplate.id,
+			Repo: &github.Repository{
+				Name: &createEventRepoName,
+			},
+		},
 		payload: &github.CreateEvent{
 			Ref: &pushPollEventCollectorEventTemplate.ref,
 			Repo: &github.Repository{
@@ -78,7 +88,6 @@ var pushPollEventCollectorTests = []struct {
 }
 
 func TestPushPollEventCollectorCollect(t *testing.T) {
-	mockEvent := mockGithubEvent(pushPollEventCollectorEventTemplate.id)
 	for i, testCase := range pushPollEventCollectorTests {
 		httpmock.Activate()
 
@@ -88,7 +97,7 @@ func TestPushPollEventCollectorCollect(t *testing.T) {
 
 		client, _ := NewGithubClient()
 		collector := pushPollEventCollector{client: client}
-		e, err := collector.Collect(&mockEvent, testCase.payload)
+		e, err := collector.Collect(&testCase.event, testCase.payload)
 		if err != nil {
 			t.Errorf("testcase %d: failed to collect event: %s", i, err)
 		} else if !reflect.DeepEqual(*e, pushPollEventCollectorEventWant) {
