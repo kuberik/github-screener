@@ -3,6 +3,7 @@ package operators
 import (
 	"context"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -133,4 +134,9 @@ func (e ETag) String() string {
 type Repo struct {
 	Name  string `json:"name"`
 	Owner string `json:"owner"`
+}
+
+func ParseRepoName(fullname string) Repo {
+	fullRepoNameSplit := strings.Split(fullname, "/")
+	return Repo{Owner: fullRepoNameSplit[0], Name: fullRepoNameSplit[1]}
 }

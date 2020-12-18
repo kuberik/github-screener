@@ -28,16 +28,18 @@ var (
 		hash:      "ab2dc7fcb96e5298446d02dbd22a09bb64af3218",
 	}
 	pushPollEventCollectorEventWant = corev1alpha1.Event{Spec: corev1alpha1.EventSpec{Data: map[string]string{
-		eventIDKey:         pushPollEventCollectorEventTemplate.id,
-		eventRefKey:        pushPollEventCollectorEventTemplate.ref,
-		eventCommitHashKey: pushPollEventCollectorEventTemplate.hash,
+		eventIDKey:            pushPollEventCollectorEventTemplate.id,
+		eventGitRefKey:        pushPollEventCollectorEventTemplate.ref,
+		eventGitBranchKey:     pushPollEventCollectorEventTemplate.branch,
+		eventGitCommitHashKey: pushPollEventCollectorEventTemplate.hash,
+		eventGithubRepoKey:    pushPollEventCollectorEventTemplate.repoName,
+		eventGithubOwnerKey:   pushPollEventCollectorEventTemplate.repoOwner,
 	}}}
 )
 
 var createEventRepoName = fmt.Sprintf("%s/%s", pushPollEventCollectorEventTemplate.repoOwner, pushPollEventCollectorEventTemplate.repoName)
 
 var pushPollEventCollectorTests = []struct {
-	event   github.Event
 	payload interface{}
 	mocks   []struct {
 		method    string
@@ -46,19 +48,12 @@ var pushPollEventCollectorTests = []struct {
 	}
 }{
 	{
-		event: mockGithubEvent(pushPollEventCollectorEventTemplate.id),
 		payload: &github.PushEvent{
 			Ref:  &pushPollEventCollectorEventTemplate.ref,
 			Head: &pushPollEventCollectorEventTemplate.hash,
 		},
 	},
 	{
-		event: github.Event{
-			ID: &pushPollEventCollectorEventTemplate.id,
-			Repo: &github.Repository{
-				Name: &createEventRepoName,
-			},
-		},
 		payload: &github.CreateEvent{
 			Ref: &pushPollEventCollectorEventTemplate.branch,
 			Repo: &github.Repository{
@@ -82,6 +77,7 @@ var pushPollEventCollectorTests = []struct {
 			),
 			responder: func(req *http.Request) (*http.Response, error) {
 				body := github.Branch{
+					Name: &pushPollEventCollectorEventTemplate.branch,
 					Commit: &github.RepositoryCommit{
 						SHA: &pushPollEventCollectorEventTemplate.hash,
 					},
@@ -103,7 +99,13 @@ func TestPushPollEventCollectorCollect(t *testing.T) {
 
 		client, _ := NewGithubClient()
 		collector := pushPollEventCollector{client: client}
-		e, err := collector.Collect(&testCase.event, testCase.payload)
+		event := &github.Event{
+			ID: &pushPollEventCollectorEventTemplate.id,
+			Repo: &github.Repository{
+				Name: &createEventRepoName,
+			},
+		}
+		e, err := collector.Collect(event, testCase.payload)
 		if err != nil {
 			t.Errorf("testcase %d: failed to collect event: %s", i, err)
 		} else if !reflect.DeepEqual(*e, pushPollEventCollectorEventWant) {
