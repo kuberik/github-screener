@@ -10,6 +10,7 @@ rules:
   - core.kuberik.io
   resources:
   - screeners
+  - events
   verbs:
   - create
   - delete
@@ -26,3 +27,11 @@ rules:
   - get
   - patch
   - update
+- apiGroups:
+  - ""
+  resources:
+  - secrets
+  verbs:
+  - get
+  - list
+  - watch
