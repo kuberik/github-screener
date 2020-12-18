@@ -16,11 +16,16 @@ import (
 )
 
 const (
-	eventIDKey         = "GITHUB_EVENT_ID"
-	eventRefKey        = "GITHUB_REF"
-	eventCommitHashKey = "GITHUB_COMMIT_HASH"
+	eventIDKey            = "GITHUB_EVENT_ID"
+	eventGitCommitHashKey = "GIT_COMMIT_HASH"
+	eventGitBranchKey     = "GIT_BRANCH"
+	eventGitRefKey        = "GIT_REF"
+	eventGithubOwnerKey   = "GITHUB_OWNER"
+	eventGithubRepoKey    = "GITHUB_REPO"
 
 	etagLabel = "github.screeners.kuberik.io/etag"
+
+	refPrefix = "refs/head/"
 )
 
 type pushPollEventCollector struct {
@@ -30,19 +35,25 @@ type pushPollEventCollector struct {
 func (c pushPollEventCollector) Collect(e *github.Event, payload interface{}) (*corev1alpha1.Event, error) {
 	ke, _ := DefaultPollEventCollector.Collect(e, payload)
 
+	repo := ParseRepoName(*e.Repo.Name)
+	ke.Spec.Data[eventGithubOwnerKey] = repo.Owner
+	ke.Spec.Data[eventGithubRepoKey] = repo.Name
+
 	switch p := payload.(type) {
 	case *github.PushEvent:
-		ke.Spec.Data[eventRefKey] = p.GetRef()
-		ke.Spec.Data[eventCommitHashKey] = *p.Head
+		ke.Spec.Data[eventGitRefKey] = p.GetRef()
+		ke.Spec.Data[eventGitCommitHashKey] = *p.Head
+		ke.Spec.Data[eventGitBranchKey] = strings.ReplaceAll(*p.Ref, refPrefix, "")
 	case *github.CreateEvent:
-		fullRepoNameSplit := strings.Split(*e.Repo.Name, "/")
-		repo := Repo{Owner: fullRepoNameSplit[0], Name: fullRepoNameSplit[1]}
+		repo := ParseRepoName(*e.Repo.Name)
 		branch, _, err := c.client.Repositories.GetBranch(context.TODO(), repo.Owner, repo.Name, p.GetRef())
 		if err != nil {
 			return nil, err
 		}
-		ke.Spec.Data[eventRefKey] = fmt.Sprintf("refs/head/%s", p.GetRef())
-		ke.Spec.Data[eventCommitHashKey] = *branch.Commit.SHA
+		ke.Spec.Data[eventGitRefKey] = fmt.Sprintf("%s%s", refPrefix, p.GetRef())
+		ke.Spec.Data[eventGitCommitHashKey] = *branch.Commit.SHA
+		ke.Spec.Data[eventGitBranchKey] = *branch.Name
+
 	default:
 		return nil, nil
 	}
