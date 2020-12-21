@@ -1,0 +1,19 @@
+---
+resources:
+- git@github.com:kuberik/genres//ci/make
+
+patchesStrategicMerge:
+- screener-config.yaml
+
+namePrefix: github-screener-
+namespace: kuberik-ci
+
+images:
+  - &image_template
+    name: clone
+    newName: golang
+    newTag: "1.15"
+  - <<: *image_template
+    name: build
+  - <<: *image_template
+    name: test
