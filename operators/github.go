@@ -100,7 +100,7 @@ func (p *EventPoller) PollOnce() (*EventPollResult, error) {
 		e, err := p.Collect(events[i], payload)
 		if err != nil {
 			p.log.Error(err, "failed to process event", "id", *events[i].ID)
-			break
+			continue
 		} else if e != nil {
 			collectedEvents = append(collectedEvents, *e)
 			p.checkpoint = *events[i].ID
